@@ -1,0 +1,25 @@
+{
+  "name": "prune-specs-webpack-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "ts-node scripts/run-harness.ts",
+    "cypress:open": "cypress open",
+    "cypress:run": "cypress run --component"
+  },
+  "devDependencies": {
+    "@cypress/webpack-dev-server": "^3.0.0",
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "affected-tests-runner": "^0.0.3",
+    "cypress": "^13.0.0",
+    "prettier": "^3.8.3",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "ts-loader": "^9.0.0",
+    "ts-node": "^10.0.0",
+    "typescript": "^5.0.0",
+    "webpack": "^5.0.0"
+  }
+}
