@@ -7,7 +7,6 @@ const ROOT = path.resolve(__dirname);
 const RAN_SPECS_FILE = path.join(ROOT, ".ran-specs.json");
 
 export default defineConfig({
-  // set a quiet reporter:
   reporter: "spec",
   component: {
     devServer: {
@@ -42,10 +41,10 @@ export default defineConfig({
         };
       },
     },
-    specPattern: "cypress/fixtures/specs/**/*.cy.{ts,tsx}",
-    supportFile: "cypress/support/component.ts",
+    specPattern: "fixtures/**/*.cy.{ts,tsx}",
+    supportFile: "support/component.ts",
+    indexHtmlFile: "support/component-index.html",
     setupNodeEvents(on) {
-      // Ensure the ran-specs file exists and is an array
       function readRanSpecs(): string[] {
         try {
           return JSON.parse(
@@ -76,9 +75,5 @@ export default defineConfig({
         },
       });
     },
-  },
-  e2e: {
-    specPattern: "cypress/e2e/**/*.cy.ts",
-    supportFile: false,
   },
 });

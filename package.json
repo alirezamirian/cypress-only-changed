@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "test": "ts-node scripts/run-harness.ts",
+    "test": "ts-node scripts/test.ts",
     "cypress:open": "cypress open",
     "cypress:run": "cypress run --component"
   },

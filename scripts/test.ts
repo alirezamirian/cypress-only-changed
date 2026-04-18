@@ -1,17 +1,4 @@
 #!/usr/bin/env ts-node
-/**
- * Harness runner for CypressAffectedPlugin.
- *
- * For each scenario:
- *   1. Clears the .ran-specs.json tracking file.
- *   2. Runs `cypress run --component` with CHANGED_FILES set.
- *   3. Reads .ran-specs.json to see which specs called recordSpecRan.
- *   4. Asserts expectedToRun and expectedToSkip match reality.
- *
- * Usage:
- *   npm test
- *   npx ts-node scripts/run-harness.ts
- */
 
 import { execSync, ExecSyncOptionsWithStringEncoding } from "child_process";
 import * as path from "path";
@@ -19,8 +6,6 @@ import * as fs from "fs";
 
 const ROOT = path.resolve(__dirname, "..");
 const RAN_SPECS_FILE = path.join(ROOT, ".ran-specs.json");
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 function abs(relative: string): string {
   return path.join(ROOT, relative);
@@ -38,8 +23,6 @@ function readRanSpecs(): string[] {
   }
 }
 
-// ─── Scenarios ──────────────────────────────────────────────────────────────
-
 interface Scenario {
   name: string;
   changedFiles: string[];
@@ -53,65 +36,63 @@ const SCENARIOS: Scenario[] = [
     changedFiles: [],
     expectedToRun: [],
     expectedToSkip: [
-      "button.cy.tsx",
-      "input.cy.tsx",
-      "form.cy.tsx",
+      "Button.cy.tsx",
+      "Input.cy.tsx",
+      "Form.cy.tsx",
       "utils.cy.ts",
       "unrelated.cy.ts",
     ],
   },
   {
     name: "spec file itself changed — only that spec runs",
-    changedFiles: [abs("cypress/fixtures/specs/button.cy.tsx")],
-    expectedToRun: ["button.cy.tsx"],
+    changedFiles: [abs("fixtures/basic/Button.cy.tsx")],
+    expectedToRun: ["Button.cy.tsx"],
     expectedToSkip: [
-      "input.cy.tsx",
-      "form.cy.tsx",
+      "Input.cy.tsx",
+      "Form.cy.tsx",
       "utils.cy.ts",
       "unrelated.cy.ts",
     ],
   },
   {
     name: "direct component dep changed (Button.tsx) — button and form run",
-    changedFiles: [abs("cypress/fixtures/components/Button.tsx")],
-    expectedToRun: ["button.cy.tsx", "form.cy.tsx"],
-    expectedToSkip: ["input.cy.tsx", "utils.cy.ts", "unrelated.cy.ts"],
+    changedFiles: [abs("fixtures/basic/Button.tsx")],
+    expectedToRun: ["Button.cy.tsx", "Form.cy.tsx"],
+    expectedToSkip: ["Input.cy.tsx", "utils.cy.ts", "unrelated.cy.ts"],
   },
   {
     name: "direct component dep changed (Input.tsx) — input and form run",
-    changedFiles: [abs("cypress/fixtures/components/Input.tsx")],
-    expectedToRun: ["input.cy.tsx", "form.cy.tsx"],
-    expectedToSkip: ["button.cy.tsx", "utils.cy.ts", "unrelated.cy.ts"],
+    changedFiles: [abs("fixtures/basic/Input.tsx")],
+    expectedToRun: ["Input.cy.tsx", "Form.cy.tsx"],
+    expectedToSkip: ["Button.cy.tsx", "utils.cy.ts", "unrelated.cy.ts"],
   },
   {
     name: "two util deps changed — input, form, and utils run",
     changedFiles: [
-      abs("cypress/fixtures/components/Input.tsx"),
-      abs("cypress/fixtures/components/format.ts"),
+      abs("fixtures/basic/Input.tsx"),
+      abs("fixtures/basic/format.ts"),
     ],
-    expectedToRun: ["input.cy.tsx", "form.cy.tsx", "utils.cy.ts"],
-    expectedToSkip: ["button.cy.tsx", "unrelated.cy.ts"],
+    expectedToRun: ["Input.cy.tsx", "Form.cy.tsx", "utils.cy.ts"],
+    expectedToSkip: ["Button.cy.tsx", "unrelated.cy.ts"],
   },
   {
     name: "constants.ts changed — only unrelated runs",
-    changedFiles: [abs("cypress/fixtures/components/constants.ts")],
+    changedFiles: [abs("fixtures/basic/constants.ts")],
     expectedToRun: ["unrelated.cy.ts"],
     expectedToSkip: [
-      "button.cy.tsx",
-      "input.cy.tsx",
-      "form.cy.tsx",
+      "Button.cy.tsx",
+      "Input.cy.tsx",
+      "Form.cy.tsx",
       "utils.cy.ts",
     ],
   },
   {
-    name: "package-a Input.tsx changed — package-a-button.cy.tx does not run (tree-shaking)",
-    changedFiles: [abs("cypress/fixtures/components/package-a/Input.tsx")],
-    expectedToRun: ["package-a-input.cy.tsx"],
-    expectedToSkip: ["package-a-button.cy.tsx"],
+    name: "package-a Input.tsx changed — package-a/Button.cy.tsx does not run (tree-shaking)",
+    changedFiles: [abs("fixtures/basic/package-a/Input.tsx")],
+    expectedToRun: ["package-a/Input.cy.tsx"],
+    expectedToSkip: ["package-a/Button.cy.tsx"],
   },
 ];
-
-// ─── Runner ─────────────────────────────────────────────────────────────────
 
 interface ScenarioResult {
   scenario: string;
@@ -123,7 +104,6 @@ interface ScenarioResult {
 function runScenario(scenario: Scenario): ScenarioResult {
   const errors: string[] = [];
 
-  // Clear tracking file before the run
   clearRanSpecs();
 
   const changedFilesJson = JSON.stringify(scenario.changedFiles);
@@ -138,7 +118,7 @@ function runScenario(scenario: Scenario): ScenarioResult {
   let cypressOutput = "";
   try {
     cypressOutput = execSync(
-      'npx cypress run --component --quiet --spec "cypress/fixtures/specs/**/*.cy.{ts,tsx}"',
+      'npx cypress run --component --quiet --spec "fixtures/basic/**/*.cy.{ts,tsx}"',
       execOptions,
     );
   } catch (err) {
@@ -159,14 +139,12 @@ function runScenario(scenario: Scenario): ScenarioResult {
 
   const ranSpecs = readRanSpecs();
 
-  // Assert expectedToRun
   for (const expected of scenario.expectedToRun) {
     if (!ranSpecs.includes(expected)) {
       errors.push(`Expected "${expected}" to RUN but it was skipped.`);
     }
   }
 
-  // Assert expectedToSkip
   for (const skipped of scenario.expectedToSkip) {
     if (ranSpecs.includes(skipped)) {
       errors.push(`Expected "${skipped}" to be SKIPPED but it ran.`);
@@ -181,10 +159,8 @@ function runScenario(scenario: Scenario): ScenarioResult {
   };
 }
 
-// ─── Main ────────────────────────────────────────────────────────────────────
-
 function main(): void {
-  console.log("\n=== CypressAffectedPlugin harness ===\n");
+  console.log("\n=== CypressAffectedPlugin tests ===\n");
 
   const results: ScenarioResult[] = [];
 
