@@ -34,6 +34,10 @@ export default defineConfig({
                   },
                 },
               },
+              {
+                test: /\.css$/,
+                type: "asset/source",
+              },
             ],
           },
           mode: "development",
