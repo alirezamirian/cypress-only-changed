@@ -41,9 +41,9 @@ export default defineConfig({
         };
       },
     },
-    specPattern: "fixtures/**/*.cy.{ts,tsx}",
-    supportFile: "support/component.ts",
-    indexHtmlFile: "support/component-index.html",
+    specPattern: "tests/fixtures/**/*.cy.{ts,tsx}",
+    supportFile: "tests/support/component.ts",
+    indexHtmlFile: "tests/support/component-index.html",
     setupNodeEvents(on) {
       function readRanSpecs(): string[] {
         try {

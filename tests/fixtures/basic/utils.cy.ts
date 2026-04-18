@@ -2,10 +2,6 @@ import { format } from './format';
 import { validate } from './validate';
 
 describe('utils', () => {
-  beforeEach(() => {
-    cy.task('recordSpecRan', 'utils.cy.ts');
-  });
-
   it('format trims and lowercases', () => {
     expect(format('  Hello  ')).to.equal('hello');
   });

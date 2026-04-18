@@ -11,3 +11,7 @@ declare global {
 }
 
 Cypress.Commands.add('mount', mount);
+
+beforeEach(() => {
+  cy.task('recordSpecRan', Cypress.spec.name);
+});

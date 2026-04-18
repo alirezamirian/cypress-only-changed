@@ -11,13 +11,16 @@ re-exports don't drag in unrelated modules.
 - `cypress.config.ts` — wires the plugin into Cypress component testing,
   reads `CHANGED_FILES` env var (JSON array of absolute paths), registers
   `recordSpecRan` / `getRanSpecs` / `clearRanSpecs` tasks
-- `scripts/test.ts` — scenario runner (the test suite). For each
-  scenario, sets `CHANGED_FILES`, runs `cypress run --component`, reads
-  `.ran-specs.json`, asserts `expectedToRun` / `expectedToSkip`
-- `fixtures/` — test data: each subdirectory is a self-contained fake app
-  - `fixtures/basic/` — baseline fixture; specs live next to the source
-    they test (e.g. `Button.tsx` + `Button.cy.tsx` in the same dir)
-- `support/` — Cypress support files (`component.ts`, `component-index.html`)
+- `tests/` — everything test-related
+  - `fixtures/` — self-contained fake apps; specs colocated next to source
+    - `basic/` — direct and transitive dep scenarios (no barrel)
+    - `barrel-exports/` — tree-shaking via barrel `index.ts`
+  - `support/` — Cypress support files (`component.ts`, `component-index.html`)
+  - `helpers.ts` — `runFixture(fixture, changedFiles)`: sets `CHANGED_FILES`,
+    runs `cypress run --component`, returns the list of specs that called
+    `recordSpecRan`; plus `assertRan()` and `abs()` utilities
+  - `basic.test.ts` — direct/transitive dep scenarios
+  - `barrel-exports.test.ts` — tree-shaking via barrel scenarios
 - `tsconfig.json` — **`"module": "commonjs"`** (needed elsewhere)
 - `tsconfig.build.json` — overrides with `"module": "ESNext"`,
   `"moduleResolution": "bundler"` and is what `ts-loader` uses in the
@@ -26,7 +29,7 @@ re-exports don't drag in unrelated modules.
   `CommonJsRequireDependency` instead of harmony deps, and the whole
   tree-shaking approach breaks.
 
-Run the tests: `npm test` (or `npx ts-node scripts/test.ts`).
+Run the tests: `npm test`.
 
 ## Plugin architecture
 
