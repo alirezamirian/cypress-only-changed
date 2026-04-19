@@ -1,10 +1,38 @@
+import * as path from "path";
 import type { Compiler, Compilation, Module } from "webpack";
 import { NormalModule, sources } from "webpack";
 
-const STUB_CONTENT = `describe('__skipped__', () => {});`;
+export interface SpecReport {
+  specPath: string;
+  deps: string[];
+  changedDeps: string[];
+}
 
 interface CypressAffectedPluginOptions {
   changedFiles: string[];
+  report?: boolean | ((report: SpecReport) => void);
+}
+
+const GREY = "\x1b[90m";
+const RESET = "\x1b[0m";
+const grey = (s: string) => `${GREY}${s}${RESET}`;
+
+function reportInConsole({ specPath, deps, changedDeps }: SpecReport): void {
+  const specName = path.basename(specPath);
+  const changedSet = new Set(changedDeps);
+  const depNames = deps
+    .map((p) => {
+      const name = path.basename(p);
+      return changedSet.has(p) ? name : grey(name);
+    })
+    .join(", ");
+  const verb = changedDeps.length === 0 ? "SKIP" : "RUN ";
+  console.info(`[prune-specs] ${verb}  ${specName}  ${depNames}`);
+}
+
+function buildSkipStub(depCount: number): string {
+  const msg = `no changed dependencies — ${depCount} files checked`;
+  return `describe('__skipped__', () => { it.skip(${JSON.stringify(msg)}, () => {}); });`;
 }
 
 const SPEC_PATTERN = /\.cy\.(ts|tsx)$/;
@@ -267,9 +295,16 @@ function collectTransitiveDeps(
 
 export class CypressAffectedPlugin {
   private readonly changedFiles: Set<string>;
+  private readonly report: ((report: SpecReport) => void) | undefined;
 
-  constructor({ changedFiles }: CypressAffectedPluginOptions) {
+  constructor({ changedFiles, report }: CypressAffectedPluginOptions) {
     this.changedFiles = new Set(changedFiles);
+    this.report =
+      typeof report === "function"
+        ? report
+        : report
+          ? reportInConsole
+          : undefined;
   }
 
   apply(compiler: Compiler): void {
@@ -288,17 +323,25 @@ export class CypressAffectedPlugin {
 
                 const allDeps = collectTransitiveDeps(module, moduleGraph);
 
-                let hasChangedDep = false;
+                const changedDeps: string[] = [];
                 for (const depPath of allDeps) {
                   if (this.changedFiles.has(depPath)) {
-                    hasChangedDep = true;
-                    break;
+                    changedDeps.push(depPath);
                   }
                 }
 
-                if (!hasChangedDep) {
-                  const stubSource = new sources.RawSource(STUB_CONTENT);
-                  const mod = module as NormalModule & { generator: object };
+                const mod = module as NormalModule & { generator: any };
+
+                this.report?.({
+                  specPath: module.resource,
+                  deps: [...allDeps],
+                  changedDeps,
+                });
+
+                if (changedDeps.length === 0) {
+                  const stubSource = new sources.RawSource(
+                    buildSkipStub(allDeps.size),
+                  );
                   mod.generator = Object.create(mod.generator, {
                     generate: {
                       value: () => stubSource,

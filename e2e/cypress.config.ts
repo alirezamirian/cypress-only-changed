@@ -43,7 +43,12 @@ export default defineConfig({
             ],
           },
           mode: "development",
-          plugins: [new CypressAffectedPlugin({ changedFiles, debug: true })],
+          plugins: [
+            new CypressAffectedPlugin({
+              changedFiles,
+              report: true,
+            }),
+          ],
         };
       },
     },
