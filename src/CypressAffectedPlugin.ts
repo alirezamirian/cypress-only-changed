@@ -65,6 +65,7 @@ function computeNeededForRequest(
   from: NormalModule,
   request: string,
   fromNeeded: NeededExports,
+  target: Module | null,
 ): NeededExports | null {
   let needed: Set<string> | null = null;
   let sawAnyDep = false;
@@ -88,11 +89,43 @@ function computeNeededForRequest(
       sawAnyDep = true;
       const exportedName: string | null = d.name ?? null;
       if (exportedName === null) {
-        // `export * from request` — every name from target could satisfy
-        // one of fromNeeded. Pass fromNeeded through.
+        // `export * from request` — only propagate names the target actually
+        // provides. getProvidedExports() is populated by FlagDependencyExports-
+        // Plugin which hasn't run yet at finishModules time, so we read the
+        // target's own parse-time export dependencies instead — these are set
+        // by the harmony parser during module building and are always available.
         if (fromNeeded === "all") return "all";
-        needed ??= new Set();
-        for (const n of fromNeeded) needed.add(n);
+        if (target instanceof NormalModule) {
+          let targetHasStarReexport = false;
+          const targetProvides = new Set<string>();
+          for (const td of target.dependencies) {
+            const td_ = td as any;
+            if (td_.type === "harmony export specifier") {
+              targetProvides.add(td_.name);
+            } else if (td_.type === "harmony export imported specifier") {
+              if (td_.name !== null) targetProvides.add(td_.name);
+              else targetHasStarReexport = true;
+            }
+          }
+          if (targetHasStarReexport) {
+            // Target itself star-re-exports; can't enumerate names statically
+            // without recursing → conservative.
+            needed ??= new Set();
+            for (const n of fromNeeded) needed.add(n);
+          } else {
+            for (const n of fromNeeded) {
+              if (targetProvides.has(n)) {
+                needed ??= new Set();
+                needed.add(n);
+              }
+            }
+            // If no intersection, needed stays null → edge pruned below.
+          }
+        } else {
+          // Non-NormalModule target → conservative.
+          needed ??= new Set();
+          for (const n of fromNeeded) needed.add(n);
+        }
       } else {
         // Named re-export — only include if consumers actually want this name.
         const wanted =
@@ -208,6 +241,7 @@ function collectTransitiveDeps(
             current,
             request,
             currentNeeded,
+            target,
           );
           if (result === null) continue; // prune — nothing from target is needed
           incoming = result;
