@@ -57,22 +57,53 @@ only transitively referenced. Extra false-positive dep; no false negatives.
 
 ---
 
-### 4. Deep `export *` chains fall back to conservative
+### 4. Intermediate `export *` barrels are false-positived when they re-export via `export *`
 
 To resolve `export * from './target'`, the plugin reads the target module's
-parse-time harmony dep types to enumerate what it provides. When the target
-itself also has a star re-export (`export * from './deeper'`), its export list
-cannot be enumerated statically without recursing, so `fromNeeded` is passed
-through conservatively.
+parse-time harmony dep types to enumerate what names it provides. When the
+target itself also contains a star re-export (`export * from './deeper'`), its
+full export list cannot be determined statically, so the edge is followed
+conservatively: the BFS visits that target even if it does not actually provide
+any of the needed names.
 
 Webpack handles this correctly via `moduleGraph.getProvidedExports()`, which is
 populated by `FlagDependencyExportsPlugin`. That plugin also hooks `finishModules`
 but runs after `CypressAffectedPlugin`'s tap, so `getProvidedExports()` returns
 `null` at the time the BFS runs.
 
-**Impact:** In `A → B (export * from C) → C` chains, when only some of C's
-exports are needed, the BFS may still include all of them. Uncommon in
-application code; safe (no false negatives).
+**Concrete example.** Given a root barrel:
+
+```ts
+// src/index.ts
+export * from './components';  // components/index.ts: export * from './Button', export * from './Input'
+export * from './utils';       // utils/index.ts: export * from './formatDate', export * from './capitalize'
+```
+
+A spec that imports only `{ Button }` from `src/index.ts` causes this traversal:
+
+- `src/index.ts` is visited with `needed = {'Button'}`.
+- Processing `./components`: `components/index.ts` has star re-exports →
+  `targetHasStarReexport = true` → follow with `{'Button'}`. ✓ correct
+- Processing `./utils`: `utils/index.ts` has star re-exports →
+  `targetHasStarReexport = true` → follow with `{'Button'}`. ✗ false positive
+- Visiting `components/index.ts` with `{'Button'}`:
+  - `./Button` provides `Button` → follow. ✓
+  - `./Input` provides `Input`, no intersection → prune. ✓
+- Visiting `utils/index.ts` with `{'Button'}`:
+  - `./formatDate` provides `formatDate`, no intersection → prune. ✓
+  - `./capitalize` provides `capitalize`, no intersection → prune. ✓
+
+The leaf modules (`formatDate.ts`, `capitalize.ts`, `Input.tsx`) are correctly
+excluded. But **`utils/index.ts` itself is in the dep set**: if it changes, the
+spec is incorrectly flagged as affected.
+
+**Scope.** The false positive is limited to intermediate barrel files that
+(a) are reachable from the spec and (b) use `export *` syntax pointing at
+modules that also use `export *`. Leaf source files in those barrels are
+correctly pruned. The depth of the chain does not matter; what matters is
+whether any barrel in the chain uses `export *` and that barrel's immediate
+re-export targets also use `export *`. This pattern is common in React/TypeScript
+codebases with nested component library barrels.
 
 ---
 
