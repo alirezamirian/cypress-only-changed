@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "test": "node --require ts-node/register --test --test-reporter=spec tests/*.test.ts",
+    "test": "node --require ts-node/register --test --test-concurrency=1 --test-reporter=spec e2e/specs/*.test.ts",
     "cypress:open": "cypress open",
     "cypress:run": "cypress run --component"
   },

@@ -1,10 +1,12 @@
 import { defineConfig } from "cypress";
 import * as path from "path";
 import * as fs from "fs";
-import { CypressAffectedPlugin } from "./src/CypressAffectedPlugin";
+import { CypressAffectedPlugin } from "../src/CypressAffectedPlugin";
 
-const ROOT = path.resolve(__dirname);
-const RAN_SPECS_FILE = path.join(ROOT, ".ran-specs.json");
+export const RAN_SPECS_FILE = path.join(
+  path.resolve(__dirname),
+  ".ran-specs.json",
+);
 
 export default defineConfig({
   reporter: "spec",
@@ -41,13 +43,13 @@ export default defineConfig({
             ],
           },
           mode: "development",
-          plugins: [new CypressAffectedPlugin({ changedFiles })],
+          plugins: [new CypressAffectedPlugin({ changedFiles, debug: true })],
         };
       },
     },
-    specPattern: "tests/fixtures/**/*.cy.{ts,tsx}",
-    supportFile: "tests/support/component.ts",
-    indexHtmlFile: "tests/support/component-index.html",
+    specPattern: "fixtures/**/*.cy.{ts,tsx}",
+    supportFile: "support/component.ts",
+    indexHtmlFile: "support/component-index.html",
     setupNodeEvents(on) {
       function readRanSpecs(): string[] {
         try {

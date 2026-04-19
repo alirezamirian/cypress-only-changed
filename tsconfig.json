@@ -11,6 +11,8 @@
     "rootDir": ".",
     "skipLibCheck": true
   },
-  "include": ["src/**/*", "tests/**/*", "cypress.config.ts", "webpack.config.ts"],
+  "include": ["src/**/*",
+    "e2e/**/*",
+    "e2e/cypress.config.ts", "webpack.config.ts"],
   "exclude": ["node_modules", "dist"]
 }

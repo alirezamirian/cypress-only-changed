@@ -2,25 +2,32 @@
 
 Webpack 5 plugin that speeds up Cypress component-test CI by replacing the
 source of specs whose transitive dep tree doesn't touch any changed file
-with `describe('__skipped__', () => {});`. Tree-shaking-aware so barrel
+with a stub containing a pending `it.skip` test. Tree-shaking-aware so barrel
 re-exports don't drag in unrelated modules.
 
 ## Layout
 
 - `src/CypressAffectedPlugin.ts` — the plugin
-- `cypress.config.ts` — wires the plugin into Cypress component testing,
-  reads `CHANGED_FILES` env var (JSON array of absolute paths), registers
-  `recordSpecRan` / `getRanSpecs` / `clearRanSpecs` tasks
-- `tests/` — everything test-related
+- `e2e/` — everything test-related
+  - `cypress.config.ts` — wires the plugin into Cypress component testing;
+    reads `CHANGED_FILES` env var (JSON array of absolute paths); exports
+    `RAN_SPECS_FILE` constant; registers `recordSpecRan` / `getRanSpecs` /
+    `clearRanSpecs` tasks
   - `fixtures/` — self-contained fake apps; specs colocated next to source
     - `basic/` — direct and transitive dep scenarios (no barrel)
-    - `barrel-exports/` — tree-shaking via barrel `index.ts`
+    - `barrel-exports/` — tree-shaking via barrel `index.ts`; includes
+      `utils-barrel.ts` / `utils.ts` to demonstrate the `export *` false-positive
+    - `css-import/` — CSS asset import scenario
+    - `tsconfig.json`, `css.d.ts` — shared fixture config/typings
+  - `runFixture.ts` — `runFixture(fixture, changedFiles)`: sets `CHANGED_FILES`
+    (paths are relative to the fixture folder), runs `cypress run --component`,
+    returns a result object with fluent assertion methods:
+    `.assertRan(...specs)`, `.assertSkipped(...specs)`, `.assertAllSkipped()`
+  - `specs/` — Node test runner suites
+    - `basic.test.ts` — direct/transitive dep scenarios
+    - `barrel-exports.test.ts` — tree-shaking via barrel scenarios
+    - `css-import.test.ts` — CSS asset dep scenario
   - `support/` — Cypress support files (`component.ts`, `component-index.html`)
-  - `helpers.ts` — `runFixture(fixture, changedFiles)`: sets `CHANGED_FILES`,
-    runs `cypress run --component`, returns the list of specs that called
-    `recordSpecRan`; plus `assertRan()` and `abs()` utilities
-  - `basic.test.ts` — direct/transitive dep scenarios
-  - `barrel-exports.test.ts` — tree-shaking via barrel scenarios
 - `tsconfig.json` — **`"module": "commonjs"`** (needed elsewhere)
 - `tsconfig.build.json` — overrides with `"module": "ESNext"`,
   `"moduleResolution": "bundler"` and is what `ts-loader` uses in the
@@ -39,9 +46,14 @@ Hooks `compilation.hooks.finishModules`. For each module matching
 1. `collectTransitiveDeps(specModule, moduleGraph)` — BFS that returns
    the set of resource paths the spec actually depends on.
 2. If no dep path is in `this.changedFiles`, override `module.generator`
-   via `Object.create` so `generate()` returns the `__skipped__` stub.
+   via `Object.create` so `generate()` returns a stub:
+   `describe('__skipped__', () => { it.skip('no changed dependencies — N files checked', () => {}); })`.
    **Do not** clear `module.dependencies` / `module.blocks` — that
    breaks chunk graph and you get `ChunkLoadError`.
+3. With `debug: true` (set in `e2e/cypress.config.ts`): skipped stubs also
+   include a `console.info` with the full dep list; running specs get a
+   `before()` prepended (via generator wrapping with `ConcatSource`) that
+   calls `Cypress.log` with the triggering changed files.
 
 ### Tree-shaking-aware BFS
 
@@ -91,11 +103,11 @@ so we don't re-queue.
 
 ## Test quirks
 
-- `scripts/test.ts` runs all specs per scenario through a single `cypress run`;
-  the plugin processes all spec modules in one `finishModules` pass.
-- Occasionally a scenario's `ran:` list contains a spec name twice
-  (e.g. `utils.cy.ts, utils.cy.ts`) — harmless duplicate from cypress
-  re-running, assertions use `includes()` so it passes.
+- Each `runFixture` call runs all specs for that fixture in a single
+  `cypress run`; the plugin processes all spec modules in one `finishModules`
+  pass.
+- `runFixture` passes `changedFiles` relative to the fixture folder; it
+  resolves them to absolute paths before setting `CHANGED_FILES`.
 - First full run after a change can have flaky failures (HMR/compilation
   timing in the dev server); re-run before debugging.
 
