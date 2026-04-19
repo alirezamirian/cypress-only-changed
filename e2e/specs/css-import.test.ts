@@ -7,7 +7,7 @@ describe("css-import", { concurrency: false }, () => {
   });
 
   it("Button.css changed — only Button runs (Label has no CSS dep)", () => {
-    const ran = runFixture("css-import", ["Button.css"])
+    runFixture("css-import", ["Button.css"])
       .assertRan("Button.cy.tsx")
       .assertSkipped("Label.cy.tsx");
   });

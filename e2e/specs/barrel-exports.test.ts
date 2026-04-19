@@ -13,7 +13,7 @@ describe("barrel-exports", { concurrency: false }, () => {
   });
 
   it("Button.tsx changed — only Button runs (Input tree-shaken)", () => {
-    const ran = runFixture("barrel-exports", ["Button.tsx"])
+    runFixture("barrel-exports", ["Button.tsx"])
       .assertRan("Button.cy.tsx")
       .assertSkipped("Input.cy.tsx");
   });
