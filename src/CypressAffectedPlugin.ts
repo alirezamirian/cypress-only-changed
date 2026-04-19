@@ -6,6 +6,7 @@ export interface SpecReport {
   specPath: string;
   deps: string[];
   changedDeps: string[];
+  directDeps: Map<string, string[]>; // adjacency: path → its direct followed dep paths
 }
 
 interface CypressAffectedPluginOptions {
@@ -17,17 +18,51 @@ const GREY = "\x1b[90m";
 const RESET = "\x1b[0m";
 const grey = (s: string) => `${GREY}${s}${RESET}`;
 
-function reportInConsole({ specPath, deps, changedDeps }: SpecReport): void {
+function renderDepTree(
+  root: string,
+  adjacency: Map<string, string[]>,
+  changedSet: Set<string>,
+): string[] {
+  const visited = new Set<string>([root]);
+  const lines: string[] = [];
+
+  function visit(node: string, prefix: string, isLast: boolean): void {
+    const connector = isLast ? "└── " : "├── ";
+    const name = path.basename(node);
+    const alreadySeen = visited.has(node);
+    const label = alreadySeen
+      ? grey(`${name} ↩`)
+      : changedSet.has(node)
+        ? name
+        : grey(name);
+    lines.push(prefix + connector + label);
+    if (!alreadySeen) {
+      visited.add(node);
+      const children = adjacency.get(node) ?? [];
+      const childPrefix = prefix + (isLast ? "    " : "│   ");
+      children.forEach((child, i) =>
+        visit(child, childPrefix, i === children.length - 1),
+      );
+    }
+  }
+
+  const rootChildren = adjacency.get(root) ?? [];
+  rootChildren.forEach((child, i) =>
+    visit(child, "  ", i === rootChildren.length - 1),
+  );
+  return lines;
+}
+
+function reportInConsole({
+  specPath,
+  changedDeps,
+  directDeps,
+}: SpecReport): void {
   const specName = path.basename(specPath);
-  const changedSet = new Set(changedDeps);
-  const depNames = deps
-    .map((p) => {
-      const name = path.basename(p);
-      return changedSet.has(p) ? name : grey(name);
-    })
-    .join(", ");
   const verb = changedDeps.length === 0 ? "SKIP" : "RUN ";
-  console.info(`[prune-specs] ${verb}  ${specName}  ${depNames}`);
+  const changedSet = new Set(changedDeps);
+  const treeLines = renderDepTree(specPath, directDeps, changedSet);
+  console.info([`[prune-specs] ${verb}  ${specName}`, ...treeLines].join("\n"));
 }
 
 function buildSkipStub(depCount: number): string {
@@ -228,19 +263,22 @@ const HARMONY_TYPES = new Set([
 function collectTransitiveDeps(
   startModule: NormalModule,
   moduleGraph: Compilation["moduleGraph"],
-): Set<string> {
+): { paths: Set<string>; adjacency: Map<string, string[]> } {
   const needed = new Map<Module, NeededExports>();
   needed.set(startModule, "all");
   const queue: Module[] = [startModule];
   const paths = new Set<string>();
+  const adjSet = new Map<string, Set<string>>();
 
   while (queue.length > 0) {
     const current = queue.shift()!;
     const currentNeeded = needed.get(current)!;
+    const currentPath =
+      current instanceof NormalModule && current.resource
+        ? current.resource
+        : null;
 
-    if (current instanceof NormalModule && current.resource) {
-      paths.add(current.resource);
-    }
+    if (currentPath) paths.add(currentPath);
 
     // Process each outgoing connection. Harmony deps pointing at the same
     // request share a single decision via computeNeededForRequest(); we
@@ -282,6 +320,17 @@ function collectTransitiveDeps(
         incoming = "all";
       }
 
+      // Record the followed edge in the adjacency map.
+      const targetPath =
+        target instanceof NormalModule && target.resource
+          ? target.resource
+          : null;
+      if (currentPath && targetPath) {
+        let set = adjSet.get(currentPath);
+        if (!set) adjSet.set(currentPath, (set = new Set()));
+        set.add(targetPath);
+      }
+
       const { changed, result } = mergeNeeded(needed.get(target), incoming);
       if (changed) {
         needed.set(target, result);
@@ -290,7 +339,9 @@ function collectTransitiveDeps(
     }
   }
 
-  return paths;
+  const adjacency = new Map<string, string[]>();
+  for (const [k, v] of adjSet) adjacency.set(k, [...v]);
+  return { paths, adjacency };
 }
 
 export class CypressAffectedPlugin {
@@ -321,7 +372,10 @@ export class CypressAffectedPlugin {
                 if (!(module instanceof NormalModule)) continue;
                 if (!SPEC_PATTERN.test(module.resource)) continue;
 
-                const allDeps = collectTransitiveDeps(module, moduleGraph);
+                const { paths: allDeps, adjacency } = collectTransitiveDeps(
+                  module,
+                  moduleGraph,
+                );
 
                 const changedDeps: string[] = [];
                 for (const depPath of allDeps) {
@@ -336,6 +390,7 @@ export class CypressAffectedPlugin {
                   specPath: module.resource,
                   deps: [...allDeps],
                   changedDeps,
+                  directDeps: adjacency,
                 });
 
                 if (changedDeps.length === 0) {
