@@ -24,7 +24,7 @@ export function runFixture(fixture: string, changedFiles: string[]) {
     cwd: path.resolve(__dirname),
     env: {
       ...process.env,
-      CHANGED_FILES: JSON.stringify(
+      _CHANGED_FILES: JSON.stringify(
         changedFiles.map((changedFile) =>
           abs(`fixtures/${fixture}/${changedFile}`),
         ),

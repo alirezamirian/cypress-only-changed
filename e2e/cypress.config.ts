@@ -14,43 +14,31 @@ export default defineConfig({
     devServer: {
       framework: "react",
       bundler: "webpack",
-      webpackConfig: async () => {
-        const changedFilesEnv = process.env.CHANGED_FILES;
-        const changedFiles: string[] = changedFilesEnv
-          ? JSON.parse(changedFilesEnv).map((f: string) => path.resolve(f))
-          : [];
-
-        return {
-          resolve: {
-            extensions: [".ts", ".tsx", ".js"],
-          },
-          module: {
-            rules: [
-              {
-                test: /\.tsx?$/,
-                exclude: /node_modules/,
-                use: {
-                  loader: "ts-loader",
-                  options: {
-                    configFile: "tsconfig.build.json",
-                  },
-                },
+      webpackConfig: async () => ({
+        resolve: {
+          extensions: [".ts", ".tsx", ".js"],
+        },
+        module: {
+          rules: [
+            {
+              test: /\.tsx?$/,
+              exclude: /node_modules/,
+              use: {
+                loader: "ts-loader",
+                options: { configFile: "tsconfig.build.json" },
               },
-              {
-                test: /\.css$/,
-                type: "asset/source",
-              },
-            ],
-          },
-          mode: "development",
-          plugins: [
-            new CypressAffectedPlugin({
-              changedFiles,
-              report: true,
-            }),
+            },
+            {
+              test: /\.css$/,
+              type: "asset/source",
+            },
           ],
-        };
-      },
+        },
+        mode: "development",
+        // CHANGED_FILES env var is set by runFixture; otherwise the plugin
+        // falls back to git diff HEAD.
+        plugins: [new CypressAffectedPlugin({ report: true })],
+      }),
     },
     specPattern: "fixtures/**/*.cy.{ts,tsx}",
     supportFile: "support/component.ts",

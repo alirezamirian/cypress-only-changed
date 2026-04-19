@@ -1,3 +1,4 @@
+import { execSync } from "child_process";
 import * as path from "path";
 import type { Compiler, Compilation, Module } from "webpack";
 import { NormalModule, sources } from "webpack";
@@ -10,8 +11,60 @@ export interface SpecReport {
 }
 
 interface CypressAffectedPluginOptions {
-  changedFiles: string[];
   report?: boolean | ((report: SpecReport) => void);
+  excludedPaths?: string[];
+}
+
+function gitRepoRoot(): string {
+  return execSync("git rev-parse --show-toplevel", { encoding: "utf8" }).trim();
+}
+
+interface ResolvedChangedFiles {
+  files: string[];
+  label: string; // human-readable description for the startup log
+}
+
+function resolveChangedFiles(): ResolvedChangedFiles | null {
+  // Undocumented: used by the test harness to inject explicit paths without git.
+  const override = process.env._CHANGED_FILES;
+  if (override) {
+    const files = JSON.parse(override) as string[];
+    return { files, label: `${files.length} changed file(s) (injected)` };
+  }
+
+  // ONLY_CHANGED mirrors Playwright's --only-changed semantics:
+  //   (unset)        → plugin is a no-op; all specs run normally
+  //   ONLY_CHANGED=  → uncommitted changes   (git diff --name-only HEAD)
+  //   ONLY_CHANGED=ref → branch diff         (git diff --name-only ref...HEAD)
+  if (!("ONLY_CHANGED" in process.env)) return null;
+
+  let root: string;
+  try {
+    root = gitRepoRoot();
+  } catch {
+    root = process.cwd();
+  }
+
+  const ref = (process.env.ONLY_CHANGED ?? "").trim();
+  const cmd = ref
+    ? `git diff --name-only ${ref}...HEAD`
+    : "git diff --name-only HEAD";
+
+  try {
+    const raw = execSync(cmd, { encoding: "utf8" }).trim();
+    const files = raw
+      ? raw.split("\n").map((f) => path.resolve(root, f.trim())).filter(Boolean)
+      : [];
+    const label = ref
+      ? `${files.length} changed file(s) vs ${ref}`
+      : `${files.length} uncommitted changed file(s)`;
+    return { files, label };
+  } catch {
+    const label = ref
+      ? `0 changed files vs ${ref} (git error)`
+      : `0 uncommitted changed files (git error)`;
+    return { files: [], label };
+  }
 }
 
 const GREY = "\x1b[90m";
@@ -263,6 +316,7 @@ const HARMONY_TYPES = new Set([
 function collectTransitiveDeps(
   startModule: NormalModule,
   moduleGraph: Compilation["moduleGraph"],
+  isExcluded: (resource: string) => boolean,
 ): { paths: Set<string>; adjacency: Map<string, string[]> } {
   const needed = new Map<Module, NeededExports>();
   needed.set(startModule, "all");
@@ -289,6 +343,8 @@ function collectTransitiveDeps(
     for (const connection of moduleGraph.getOutgoingConnections(current)) {
       const target = connection.module;
       if (!target) continue;
+      if (target instanceof NormalModule && target.resource && isExcluded(target.resource))
+        continue;
 
       const dep = connection.dependency as any;
       const type: string | undefined = dep?.type;
@@ -345,20 +401,38 @@ function collectTransitiveDeps(
 }
 
 export class CypressAffectedPlugin {
-  private readonly changedFiles: Set<string>;
+  private readonly changedFiles: Set<string> | null;
+  private readonly startupLog: string;
   private readonly report: ((report: SpecReport) => void) | undefined;
+  private readonly isExcluded: (resource: string) => boolean;
 
-  constructor({ changedFiles, report }: CypressAffectedPluginOptions) {
-    this.changedFiles = new Set(changedFiles);
+  constructor({
+    report,
+    excludedPaths = ["node_modules"],
+  }: CypressAffectedPluginOptions = {}) {
+    const resolved = resolveChangedFiles();
+    if (resolved !== null) {
+      this.changedFiles = new Set(resolved.files);
+      this.startupLog = `[prune-specs] ${resolved.label} — running affected specs only`;
+    } else {
+      this.changedFiles = null;
+      this.startupLog = "[prune-specs] ONLY_CHANGED not set — all specs will run";
+    }
     this.report =
       typeof report === "function"
         ? report
         : report
           ? reportInConsole
           : undefined;
+    this.isExcluded =
+      excludedPaths.length === 0
+        ? () => false
+        : (resource) => excludedPaths.some((p) => resource.includes(`/${p}/`));
   }
 
   apply(compiler: Compiler): void {
+    console.info(this.startupLog);
+    if (this.changedFiles === null) return; // no-op: ONLY_CHANGED not set
     compiler.hooks.compilation.tap(
       "CypressAffectedPlugin",
       (compilation: Compilation) => {
@@ -375,11 +449,12 @@ export class CypressAffectedPlugin {
                 const { paths: allDeps, adjacency } = collectTransitiveDeps(
                   module,
                   moduleGraph,
+                  this.isExcluded,
                 );
 
                 const changedDeps: string[] = [];
                 for (const depPath of allDeps) {
-                  if (this.changedFiles.has(depPath)) {
+                  if (this.changedFiles!.has(depPath)) {
                     changedDeps.push(depPath);
                   }
                 }

@@ -2,10 +2,12 @@
   "name": "prune-specs-webpack-plugin",
   "version": "1.0.0",
   "private": true,
+  "main": "dist/CypressAffectedPlugin.js",
+  "types": "dist/CypressAffectedPlugin.d.ts",
+  "files": ["dist/", "src/"],
   "scripts": {
-    "test": "node --require ts-node/register --test --test-concurrency=1 --test-reporter=spec e2e/specs/*.test.ts",
-    "cypress:open": "cypress open",
-    "cypress:run": "cypress run --component"
+    "build": "tsc -p tsconfig.dist.json",
+    "test": "node --require ts-node/register --test --test-concurrency=1 --test-reporter=spec e2e/specs/*.test.ts"
   },
   "devDependencies": {
     "@cypress/webpack-dev-server": "^3.0.0",

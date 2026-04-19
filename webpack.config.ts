@@ -1,4 +1,3 @@
-import * as path from "path";
 import { Configuration } from "webpack";
 import { CypressAffectedPlugin } from "./src/CypressAffectedPlugin";
 
@@ -15,15 +14,7 @@ const config: Configuration = {
       },
     ],
   },
-  plugins: [
-    new CypressAffectedPlugin({
-      changedFiles: process.env.CHANGED_FILES
-        ? JSON.parse(process.env.CHANGED_FILES).map((f: string) =>
-            path.resolve(f),
-          )
-        : [],
-    }),
-  ],
+  plugins: [new CypressAffectedPlugin()],
   optimization: {
     usedExports: true,
   },
