@@ -22,6 +22,34 @@ The walk is tree-shaking–aware: barrel re-exports (`export { X } from './Y'`)
 are followed only for the names that are actually imported, so an unrelated
 module re-exported from the same index file doesn't pull the spec in.
 
+## Requirements
+
+The tree-shaking analysis relies on webpack's harmony (ESM) module graph.
+**TypeScript source files must be compiled with `"module": "ESNext"` (or
+`"preserve"`) in the tsconfig used by ts-loader.** With `"module": "commonjs"`,
+every `import` is downleveled to `require()`, webpack sees only opaque CJS
+connections, and the plugin cannot prune barrel re-exports — any spec that
+imports from a shared barrel will be considered affected by any change to any
+file that barrel transitively re-exports. The plugin emits a webpack warning
+when it detects this situation.
+
+### Configuring ts-loader for ESM output
+
+If ts-loader has no explicit `configFile`, it picks up the nearest
+`tsconfig.json`. If that file has `"module": "commonjs"` (a common default),
+create a webpack-specific override and point ts-loader at it:
+
+```json
+// tsconfig.cypress-webpack.json
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler"
+  }
+}
+```
+
 ## Installation
 
 ```bash

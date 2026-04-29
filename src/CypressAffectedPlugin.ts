@@ -1,7 +1,7 @@
 import { execSync } from "child_process";
 import * as path from "path";
 import type { Compiler, Compilation, Module } from "webpack";
-import { NormalModule, sources } from "webpack";
+import { NormalModule, WebpackError, sources } from "webpack";
 
 export interface SpecReport {
   specPath: string;
@@ -53,7 +53,10 @@ function resolveChangedFiles(): ResolvedChangedFiles | null {
   try {
     const raw = execSync(cmd, { encoding: "utf8" }).trim();
     const files = raw
-      ? raw.split("\n").map((f) => path.resolve(root, f.trim())).filter(Boolean)
+      ? raw
+          .split("\n")
+          .map((f) => path.resolve(root, f.trim()))
+          .filter(Boolean)
       : [];
     const label = ref
       ? `${files.length} changed file(s) vs ${ref}`
@@ -71,38 +74,79 @@ const GREY = "\x1b[90m";
 const RESET = "\x1b[0m";
 const grey = (s: string) => `${GREY}${s}${RESET}`;
 
-function renderDepTree(
+// When multiple nodes share the same basename, show parent/basename to disambiguate.
+function displayName(nodePath: string, allPaths: Set<string>): string {
+  const base = path.basename(nodePath);
+  for (const p of allPaths) {
+    if (p !== nodePath && path.basename(p) === base) {
+      return `${path.basename(path.dirname(nodePath))}/${base}`;
+    }
+  }
+  return base;
+}
+
+// Renders only the branches that actually lead to changed files.
+// Reachability is computed on the spanning tree (first-visit DFS), so
+// back-references are treated as leaves — they only count as "leading to a
+// changed file" if they are themselves changed, not via their (un-rendered) subtree.
+function renderReducedDepTree(
   root: string,
   adjacency: Map<string, string[]>,
   changedSet: Set<string>,
+  allPaths: Set<string>,
 ): string[] {
-  const visited = new Set<string>([root]);
-  const lines: string[] = [];
+  type Node = { path: string; backRef: boolean; children: Node[] };
 
-  function visit(node: string, prefix: string, isLast: boolean): void {
+  // Phase 1: build spanning tree with back-refs as leaves.
+  const globalVisited = new Set<string>([root]);
+  function buildTree(nodePath: string): Node {
+    return {
+      path: nodePath,
+      backRef: false,
+      children: (adjacency.get(nodePath) ?? []).map((childPath) => {
+        if (globalVisited.has(childPath)) {
+          return { path: childPath, backRef: true, children: [] };
+        }
+        globalVisited.add(childPath);
+        return buildTree(childPath);
+      }),
+    };
+  }
+
+  // Phase 2: reachability on the spanning tree.
+  // Back-refs are leaves; they only contribute if they are changed themselves.
+  function isReachable(node: Node): boolean {
+    if (changedSet.has(node.path)) return true;
+    if (node.backRef) return false;
+    return node.children.some(isReachable);
+  }
+
+  // Phase 3: render pruned spanning tree.
+  const lines: string[] = [];
+  function render(node: Node, prefix: string, isLast: boolean): void {
     const connector = isLast ? "└── " : "├── ";
-    const name = path.basename(node);
-    const alreadySeen = visited.has(node);
-    const label = alreadySeen
-      ? grey(`${name} ↩`)
-      : changedSet.has(node)
+    const name = displayName(node.path, allPaths);
+    const isChanged = changedSet.has(node.path);
+    const label = node.backRef
+      ? isChanged
+        ? `${name} ↩`
+        : grey(`${name} ↩`)
+      : isChanged
         ? name
         : grey(name);
     lines.push(prefix + connector + label);
-    if (!alreadySeen) {
-      visited.add(node);
-      const children = adjacency.get(node) ?? [];
+    if (!node.backRef) {
+      const visible = node.children.filter(isReachable);
       const childPrefix = prefix + (isLast ? "    " : "│   ");
-      children.forEach((child, i) =>
-        visit(child, childPrefix, i === children.length - 1),
+      visible.forEach((child, i) =>
+        render(child, childPrefix, i === visible.length - 1),
       );
     }
   }
 
-  const rootChildren = adjacency.get(root) ?? [];
-  rootChildren.forEach((child, i) =>
-    visit(child, "  ", i === rootChildren.length - 1),
-  );
+  const rootNode = buildTree(root);
+  const visible = rootNode.children.filter(isReachable);
+  visible.forEach((child, i) => render(child, "  ", i === visible.length - 1));
   return lines;
 }
 
@@ -112,10 +156,22 @@ function reportInConsole({
   directDeps,
 }: SpecReport): void {
   const specName = path.basename(specPath);
-  const verb = changedDeps.length === 0 ? "SKIP" : "RUN ";
+  if (changedDeps.length === 0) {
+    console.info(`[prune-specs] SKIP  ${specName}`);
+    return;
+  }
   const changedSet = new Set(changedDeps);
-  const treeLines = renderDepTree(specPath, directDeps, changedSet);
-  console.info([`[prune-specs] ${verb}  ${specName}`, ...treeLines].join("\n"));
+  const allPaths = new Set([
+    ...directDeps.keys(),
+    ...[...directDeps.values()].flat(),
+  ]);
+  const treeLines = renderReducedDepTree(
+    specPath,
+    directDeps,
+    changedSet,
+    allPaths,
+  );
+  console.info([`[prune-specs] RUN   ${specName}`, ...treeLines].join("\n"));
 }
 
 function buildSkipStub(depCount: number): string {
@@ -150,6 +206,61 @@ function depIds(dep: any): string[] | null {
 }
 
 /**
+ * Recursively computes the full set of named exports a module provides,
+ * following `export * from` chains. Used to replace the old conservative
+ * "target has a star re-export, can't tell → pass everything through"
+ * fallback that caused false positives in deep barrel trees.
+ *
+ * Returns 'all' when the set can't be bounded (non-NormalModule, or a
+ * star re-export whose target is also unbounded).
+ * Uses a cache to avoid redundant work and handle cycles.
+ */
+function computeProvidedExports(
+  module: Module,
+  moduleGraph: Compilation["moduleGraph"],
+  cache: Map<Module, Set<string> | "all">,
+): Set<string> | "all" {
+  if (!(module instanceof NormalModule)) return "all";
+  const cached = cache.get(module);
+  if (cached !== undefined) return cached;
+
+  // Placeholder prevents infinite recursion on cycles.
+  const provided = new Set<string>();
+  cache.set(module, provided);
+
+  // Map request → target module so we can follow star re-exports.
+  const requestToTarget = new Map<string, Module>();
+  for (const conn of moduleGraph.getOutgoingConnections(module)) {
+    const req = (conn.dependency as any)?.request;
+    if (req && conn.module && !requestToTarget.has(req))
+      requestToTarget.set(req, conn.module);
+  }
+
+  for (const dep of module.dependencies) {
+    const d = dep as any;
+    if (d.type === "harmony export specifier") {
+      if (d.name) provided.add(d.name);
+    } else if (d.type === "harmony export imported specifier") {
+      if (d.name !== null) {
+        if (d.name) provided.add(d.name);
+      } else {
+        // export * from '...' — recurse into the target.
+        const target = requestToTarget.get(d.request);
+        if (!target) continue;
+        const sub = computeProvidedExports(target, moduleGraph, cache);
+        if (sub === "all") {
+          cache.set(module, "all");
+          return "all";
+        }
+        for (const name of sub) provided.add(name);
+      }
+    }
+  }
+
+  return provided;
+}
+
+/**
  * Compute what `from` actually needs out of the module imported via `request`,
  * given `fromNeeded` (what `from`'s consumers need out of `from`).
  *
@@ -168,7 +279,7 @@ function depIds(dep: any): string[] | null {
  *
  * Rules (per request):
  *   • Any `import * as ns`  → 'all'
- *   • Any `export * from`   → pass through fromNeeded (conservative)
+ *   • Any `export * from`   → intersect fromNeeded with what target provides
  *   • Named `import { X }`  → add X
  *   • Named `export { X } from`
  *       - if fromNeeded === 'all' || fromNeeded.has(X) → add the source id
@@ -182,6 +293,8 @@ function computeNeededForRequest(
   request: string,
   fromNeeded: NeededExports,
   target: Module | null,
+  moduleGraph: Compilation["moduleGraph"],
+  providedExportsCache: Map<Module, Set<string> | "all">,
 ): NeededExports | null {
   let needed: Set<string> | null = null;
   let sawAnyDep = false;
@@ -211,36 +324,21 @@ function computeNeededForRequest(
         // target's own parse-time export dependencies instead — these are set
         // by the harmony parser during module building and are always available.
         if (fromNeeded === "all") return "all";
-        if (target instanceof NormalModule) {
-          let targetHasStarReexport = false;
-          const targetProvides = new Set<string>();
-          for (const td of target.dependencies) {
-            const td_ = td as any;
-            if (td_.type === "harmony export specifier") {
-              targetProvides.add(td_.name);
-            } else if (td_.type === "harmony export imported specifier") {
-              if (td_.name !== null) targetProvides.add(td_.name);
-              else targetHasStarReexport = true;
-            }
-          }
-          if (targetHasStarReexport) {
-            // Target itself star-re-exports; can't enumerate names statically
-            // without recursing → conservative.
-            needed ??= new Set();
-            for (const n of fromNeeded) needed.add(n);
-          } else {
-            for (const n of fromNeeded) {
-              if (targetProvides.has(n)) {
-                needed ??= new Set();
-                needed.add(n);
-              }
-            }
-            // If no intersection, needed stays null → edge pruned below.
-          }
-        } else {
-          // Non-NormalModule target → conservative.
+        const targetProvided =
+          target instanceof NormalModule
+            ? computeProvidedExports(target, moduleGraph, providedExportsCache)
+            : "all";
+        if (targetProvided === "all") {
           needed ??= new Set();
           for (const n of fromNeeded) needed.add(n);
+        } else {
+          for (const n of fromNeeded) {
+            if (targetProvided.has(n)) {
+              needed ??= new Set();
+              needed.add(n);
+            }
+          }
+          // If no intersection, needed stays null → edge pruned below.
         }
       } else {
         // Named re-export — only include if consumers actually want this name.
@@ -313,11 +411,29 @@ const HARMONY_TYPES = new Set([
   "harmony export imported specifier",
 ]);
 
+// Returns true when the spec's direct outgoing connections are CJS requires
+// with no harmony imports — meaning ts-loader compiled with "module": "commonjs",
+// which prevents tree-shaking of barrel re-exports.
+function hasCjsModuleFormat(
+  specModule: NormalModule,
+  moduleGraph: Compilation["moduleGraph"],
+): boolean {
+  let hasCjsRequire = false;
+  for (const connection of moduleGraph.getOutgoingConnections(specModule)) {
+    const type: string | undefined = (connection.dependency as any)?.type;
+    if (!type) continue;
+    if (HARMONY_TYPES.has(type)) return false;
+    if (type === "cjs require") hasCjsRequire = true;
+  }
+  return hasCjsRequire;
+}
+
 function collectTransitiveDeps(
   startModule: NormalModule,
   moduleGraph: Compilation["moduleGraph"],
   isExcluded: (resource: string) => boolean,
 ): { paths: Set<string>; adjacency: Map<string, string[]> } {
+  const providedExportsCache = new Map<Module, Set<string> | "all">();
   const needed = new Map<Module, NeededExports>();
   needed.set(startModule, "all");
   const queue: Module[] = [startModule];
@@ -343,7 +459,11 @@ function collectTransitiveDeps(
     for (const connection of moduleGraph.getOutgoingConnections(current)) {
       const target = connection.module;
       if (!target) continue;
-      if (target instanceof NormalModule && target.resource && isExcluded(target.resource))
+      if (
+        target instanceof NormalModule &&
+        target.resource &&
+        isExcluded(target.resource)
+      )
         continue;
 
       const dep = connection.dependency as any;
@@ -364,6 +484,8 @@ function collectTransitiveDeps(
             request,
             currentNeeded,
             target,
+            moduleGraph,
+            providedExportsCache,
           );
           if (result === null) continue; // prune — nothing from target is needed
           incoming = result;
@@ -402,7 +524,7 @@ function collectTransitiveDeps(
 
 export class CypressAffectedPlugin {
   private readonly changedFiles: Set<string> | null;
-  private readonly startupLog: string;
+  private readonly changedFilesLabel: string | null;
   private readonly report: ((report: SpecReport) => void) | undefined;
   private readonly isExcluded: (resource: string) => boolean;
 
@@ -413,10 +535,10 @@ export class CypressAffectedPlugin {
     const resolved = resolveChangedFiles();
     if (resolved !== null) {
       this.changedFiles = new Set(resolved.files);
-      this.startupLog = `[prune-specs] ${resolved.label} — running affected specs only`;
+      this.changedFilesLabel = resolved.label;
     } else {
       this.changedFiles = null;
-      this.startupLog = "[prune-specs] ONLY_CHANGED not set — all specs will run";
+      this.changedFilesLabel = null;
     }
     this.report =
       typeof report === "function"
@@ -431,8 +553,13 @@ export class CypressAffectedPlugin {
   }
 
   apply(compiler: Compiler): void {
-    console.info(this.startupLog);
-    if (this.changedFiles === null) return; // no-op: ONLY_CHANGED not set
+    if (this.changedFiles === null) {
+      console.info("[prune-specs] ONLY_CHANGED not set — all specs will run");
+      return;
+    }
+    console.info(
+      `[prune-specs] ${this.changedFilesLabel} — running affected specs only`,
+    );
     compiler.hooks.compilation.tap(
       "CypressAffectedPlugin",
       (compilation: Compilation) => {
@@ -441,10 +568,24 @@ export class CypressAffectedPlugin {
           (modules, callback) => {
             try {
               const { moduleGraph } = compilation;
+              let cjsWarningEmitted = false;
 
               for (const module of modules) {
                 if (!(module instanceof NormalModule)) continue;
                 if (!SPEC_PATTERN.test(module.resource)) continue;
+
+                if (!cjsWarningEmitted && hasCjsModuleFormat(module, moduleGraph)) {
+                  cjsWarningEmitted = true;
+                  const w = new WebpackError(
+                    "[prune-specs-webpack-plugin] TypeScript files appear to be compiled " +
+                      'with "module": "commonjs" — barrel re-exports cannot be tree-shaken ' +
+                      "and specs may run unnecessarily when unrelated files change. " +
+                      'Configure ts-loader to use "module": "ESNext" or "preserve". ' +
+                      "See the plugin README for details.",
+                  );
+                  w.hideStack = true;
+                  compilation.warnings.push(w);
+                }
 
                 const { paths: allDeps, adjacency } = collectTransitiveDeps(
                   module,
@@ -459,8 +600,6 @@ export class CypressAffectedPlugin {
                   }
                 }
 
-                const mod = module as NormalModule & { generator: any };
-
                 this.report?.({
                   specPath: module.resource,
                   deps: [...allDeps],
@@ -472,6 +611,7 @@ export class CypressAffectedPlugin {
                   const stubSource = new sources.RawSource(
                     buildSkipStub(allDeps.size),
                   );
+                  const mod = module as NormalModule & { generator: any };
                   mod.generator = Object.create(mod.generator, {
                     generate: {
                       value: () => stubSource,
