@@ -1,6 +1,6 @@
 # BFS vs `FlagDependencyUsagePlugin` — divergence analysis
 
-`CypressAffectedPlugin` reimplements a subset of webpack's tree-shaking graph
+`CypressOnlyChangedPlugin` reimplements a subset of webpack's tree-shaking graph
 traversal to decide which specs are affected by a set of changed files.
 Webpack's canonical implementation lives in
 `node_modules/webpack/lib/FlagDependencyUsagePlugin.js`.
@@ -68,7 +68,7 @@ any of the needed names.
 
 Webpack handles this correctly via `moduleGraph.getProvidedExports()`, which is
 populated by `FlagDependencyExportsPlugin`. That plugin also hooks `finishModules`
-but runs after `CypressAffectedPlugin`'s tap, so `getProvidedExports()` returns
+but runs after `CypressOnlyChangedPlugin`'s tap, so `getProvidedExports()` returns
 `null` at the time the BFS runs.
 
 **Concrete example.** Given a root barrel:
@@ -122,7 +122,7 @@ In Cypress component testing all specs compile under a single entry runtime
 
 ## Non-divergences (looks different, behaves the same)
 
-| Topic | Webpack | `CypressAffectedPlugin` | Notes |
+| Topic | Webpack | `CypressOnlyChangedPlugin` | Notes |
 |---|---|---|---|
 | All dep types | `getDependencyReferencedExports(dep, runtime)` dispatch | Explicit handling of 3 harmony types; `'all'` for everything else | Equivalent for all standard dep types |
 | CJS modules | `setUsedWithoutInfo` (no `exportsType`) | Non-harmony → follow with `'all'` | Equivalent |
@@ -135,9 +135,9 @@ In Cypress component testing all specs compile under a single entry runtime
 
 `FlagDependencyUsagePlugin` hooks `optimizeDependencies` (after `finishModules`).
 `FlagDependencyExportsPlugin` also hooks `finishModules` but runs after
-`CypressAffectedPlugin`'s tap.
+`CypressOnlyChangedPlugin`'s tap.
 
-`CypressAffectedPlugin` hooks `finishModules`. This means:
+`CypressOnlyChangedPlugin` hooks `finishModules`. This means:
 
 - `getProvidedExports()` → `null` (exports plugin hasn't run yet)
 - `getUsedExports()` → always `null` (usage plugin hasn't run yet)

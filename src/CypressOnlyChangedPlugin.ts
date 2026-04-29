@@ -10,7 +10,7 @@ export interface SpecReport {
   directDeps: Map<string, string[]>; // adjacency: path → its direct followed dep paths
 }
 
-interface CypressAffectedPluginOptions {
+interface CypressOnlyChangedPluginOptions {
   report?: boolean | ((report: SpecReport) => void);
   excludedPaths?: string[];
 }
@@ -157,7 +157,7 @@ function reportInConsole({
 }: SpecReport): void {
   const specName = path.basename(specPath);
   if (changedDeps.length === 0) {
-    console.info(`[prune-specs] SKIP  ${specName}`);
+    console.info(`[cypress-only-changed] SKIP  ${specName}`);
     return;
   }
   const changedSet = new Set(changedDeps);
@@ -171,7 +171,9 @@ function reportInConsole({
     changedSet,
     allPaths,
   );
-  console.info([`[prune-specs] RUN   ${specName}`, ...treeLines].join("\n"));
+  console.info(
+    [`[cypress-only-changed] RUN   ${specName}`, ...treeLines].join("\n"),
+  );
 }
 
 function buildSkipStub(depCount: number): string {
@@ -522,7 +524,7 @@ function collectTransitiveDeps(
   return { paths, adjacency };
 }
 
-export class CypressAffectedPlugin {
+export class CypressOnlyChangedPlugin {
   private readonly changedFiles: Set<string> | null;
   private readonly changedFilesLabel: string | null;
   private readonly report: ((report: SpecReport) => void) | undefined;
@@ -531,7 +533,7 @@ export class CypressAffectedPlugin {
   constructor({
     report,
     excludedPaths = ["node_modules"],
-  }: CypressAffectedPluginOptions = {}) {
+  }: CypressOnlyChangedPluginOptions = {}) {
     const resolved = resolveChangedFiles();
     if (resolved !== null) {
       this.changedFiles = new Set(resolved.files);
@@ -554,17 +556,19 @@ export class CypressAffectedPlugin {
 
   apply(compiler: Compiler): void {
     if (this.changedFiles === null) {
-      console.info("[prune-specs] ONLY_CHANGED not set — all specs will run");
+      console.info(
+        "[cypress-only-changed] ONLY_CHANGED not set — all specs will run",
+      );
       return;
     }
     console.info(
-      `[prune-specs] ${this.changedFilesLabel} — running affected specs only`,
+      `[cypress-only-changed] ${this.changedFilesLabel} — running affected specs only`,
     );
     compiler.hooks.compilation.tap(
-      "CypressAffectedPlugin",
+      "CypressOnlyChangedPlugin",
       (compilation: Compilation) => {
         compilation.hooks.finishModules.tapAsync(
-          "CypressAffectedPlugin",
+          "CypressOnlyChangedPlugin",
           (modules, callback) => {
             try {
               const { moduleGraph } = compilation;
@@ -574,7 +578,10 @@ export class CypressAffectedPlugin {
                 if (!(module instanceof NormalModule)) continue;
                 if (!SPEC_PATTERN.test(module.resource)) continue;
 
-                if (!cjsWarningEmitted && hasCjsModuleFormat(module, moduleGraph)) {
+                if (
+                  !cjsWarningEmitted &&
+                  hasCjsModuleFormat(module, moduleGraph)
+                ) {
                   cjsWarningEmitted = true;
                   const w = new WebpackError(
                     "[prune-specs-webpack-plugin] TypeScript files appear to be compiled " +

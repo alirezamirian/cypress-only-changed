@@ -1,9 +1,9 @@
 {
-  "name": "prune-specs-webpack-plugin",
+  "name": "cypress-only-changed",
   "version": "1.0.0",
   "private": true,
-  "main": "dist/CypressAffectedPlugin.js",
-  "types": "dist/CypressAffectedPlugin.d.ts",
+  "main": "dist/CypressOnlyChangedPlugin.js",
+  "types": "dist/CypressOnlyChangedPlugin.d.ts",
   "files": ["dist/", "src/"],
   "scripts": {
     "build": "tsc -p tsconfig.dist.json",

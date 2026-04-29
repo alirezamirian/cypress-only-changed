@@ -1,4 +1,4 @@
-# prune-specs-webpack-plugin
+# cypress-only-changed
 
 A webpack plugin for Cypress component testing that skips specs whose
 transitive dependency tree doesn't include any changed file.
@@ -53,7 +53,7 @@ create a webpack-specific override and point ts-loader at it:
 ## Installation
 
 ```bash
-npm install --save-dev prune-specs-webpack-plugin
+npm install --save-dev cypress-only-changed
 ```
 
 ## Setup
@@ -63,7 +63,7 @@ Add the plugin to your Cypress webpack configuration:
 ```ts
 // cypress.config.ts
 import { defineConfig } from 'cypress';
-import { CypressAffectedPlugin } from 'prune-specs-webpack-plugin';
+import { CypressOnlyChangedPlugin } from 'cypress-only-changed';
 
 export default defineConfig({
   component: {
@@ -71,7 +71,7 @@ export default defineConfig({
       framework: 'react',
       bundler: 'webpack',
       webpackConfig: {
-        plugins: [new CypressAffectedPlugin()],
+        plugins: [new CypressOnlyChangedPlugin()],
       },
     },
   },
@@ -114,7 +114,7 @@ Paths are resolved relative to the git repository root.
 ## Plugin options
 
 ```ts
-new CypressAffectedPlugin(options?)
+new CypressOnlyChangedPlugin(options?)
 ```
 
 | Option | Type | Default | Description |
@@ -125,9 +125,9 @@ new CypressAffectedPlugin(options?)
 ### Custom reporter
 
 ```ts
-import { CypressAffectedPlugin, SpecReport } from 'prune-specs-webpack-plugin';
+import { CypressOnlyChangedPlugin, SpecReport } from 'cypress-only-changed';
 
-new CypressAffectedPlugin({
+new CypressOnlyChangedPlugin({
   report: ({ specPath, deps, changedDeps, directDeps }: SpecReport) => {
     console.log(specPath, changedDeps.length > 0 ? 'RUN' : 'SKIP');
   },

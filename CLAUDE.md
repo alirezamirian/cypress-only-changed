@@ -1,4 +1,4 @@
-# CypressAffectedPlugin
+# CypressOnlyChangedPlugin
 
 Webpack 5 plugin that speeds up Cypress component-test CI by replacing the
 source of specs whose transitive dep tree doesn't touch any changed file
@@ -7,7 +7,7 @@ re-exports don't drag in unrelated modules.
 
 ## Layout
 
-- `src/CypressAffectedPlugin.ts` — the plugin
+- `src/CypressOnlyChangedPlugin.ts` — the plugin
 - `e2e/` — everything test-related
   - `cypress.config.ts` — wires the plugin into Cypress component testing;
     reads `CHANGED_FILES` env var (JSON array of absolute paths); exports
@@ -113,7 +113,7 @@ so we don't re-queue.
 
 ## When you need to debug the BFS
 
-The git history of `src/CypressAffectedPlugin.ts` has a version with
+The git history of `src/CypressOnlyChangedPlugin.ts` has a version with
 heavy traversal-level logging — `[BFS] visit ... needed={...}` and
 `[req X] → target  follow/PRUNED` lines. Re-add temporarily; don't
 commit with them on.

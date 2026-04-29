@@ -1,5 +1,5 @@
 import { Configuration } from "webpack";
-import { CypressAffectedPlugin } from "./src/CypressAffectedPlugin";
+import { CypressOnlyChangedPlugin } from "./src/CypressOnlyChangedPlugin";
 
 const config: Configuration = {
   resolve: {
@@ -14,7 +14,7 @@ const config: Configuration = {
       },
     ],
   },
-  plugins: [new CypressAffectedPlugin()],
+  plugins: [new CypressOnlyChangedPlugin()],
   optimization: {
     usedExports: true,
   },

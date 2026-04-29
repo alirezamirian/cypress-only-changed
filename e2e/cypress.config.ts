@@ -1,7 +1,7 @@
 import { defineConfig } from "cypress";
 import * as path from "path";
 import * as fs from "fs";
-import { CypressAffectedPlugin } from "../src/CypressAffectedPlugin";
+import { CypressOnlyChangedPlugin } from "../src/CypressOnlyChangedPlugin";
 
 export const RAN_SPECS_FILE = path.join(
   path.resolve(__dirname),
@@ -37,7 +37,7 @@ export default defineConfig({
         mode: "development",
         // CHANGED_FILES env var is set by runFixture; otherwise the plugin
         // falls back to git diff HEAD.
-        plugins: [new CypressAffectedPlugin({ report: true })],
+        plugins: [new CypressOnlyChangedPlugin({ report: true })],
       }),
     },
     specPattern: "fixtures/**/*.cy.{ts,tsx}",
