@@ -1,7 +1,9 @@
 # cypress-only-changed
 
-A webpack plugin for Cypress component testing that skips specs whose
-transitive dependency tree doesn't include any changed file.
+A webpack plugin for Cypress **component** testing that skips specs whose
+transitive dependency tree doesn't include any changed file. Similar to
+`--only-changed` option in [jest](https://jestjs.io/docs/cli#--onlychanged)
+or [playwright](https://playwright.dev/docs/test-cli#all-options).
 
 Useful in CI to avoid running the full test suite on every commit: only specs
 that _could_ be affected by the diff are executed.

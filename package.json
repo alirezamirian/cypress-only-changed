@@ -1,15 +1,16 @@
 {
   "name": "cypress-only-changed",
-  "version": "1.0.0",
-  "private": true,
+  "version": "0.0.1",
   "main": "dist/CypressOnlyChangedPlugin.js",
   "types": "dist/CypressOnlyChangedPlugin.d.ts",
   "files": [
     "dist/",
     "src/"
   ],
+  "repository": "https://github.com/alirezamirian/cypress-only-changed",
   "scripts": {
     "build": "tsc -p tsconfig.dist.json",
+    "prepublishOnly": "npm run build",
     "test": "rm e2e/GITHUB_STEP_SUMMARY.md && node --require ts-node/register --test --test-concurrency=1 --test-reporter=spec e2e/specs/*.test.ts"
   },
   "devDependencies": {
