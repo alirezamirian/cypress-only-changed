@@ -37,7 +37,7 @@ export default defineConfig({
         mode: "development",
         // CHANGED_FILES env var is set by runFixture; otherwise the plugin
         // falls back to git diff HEAD.
-        plugins: [new CypressOnlyChangedPlugin({ report: true })],
+        plugins: [new CypressOnlyChangedPlugin({ log: "verbose" })],
       }),
     },
     specPattern: "fixtures/**/*.cy.{ts,tsx}",

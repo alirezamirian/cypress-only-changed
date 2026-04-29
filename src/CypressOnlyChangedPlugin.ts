@@ -3,15 +3,18 @@ import * as path from "path";
 import type { Compiler, Compilation, Module } from "webpack";
 import { NormalModule, WebpackError, sources } from "webpack";
 
-export interface SpecReport {
+export interface SpecLog {
   specPath: string;
   deps: string[];
   changedDeps: string[];
   directDeps: Map<string, string[]>; // adjacency: path → its direct followed dep paths
 }
 
+export type BuiltinLoggerName = "minimal" | "verbose";
+export type LoggerEntry = BuiltinLoggerName | ((specLog: SpecLog) => void);
+
 interface CypressOnlyChangedPluginOptions {
-  report?: boolean | ((report: SpecReport) => void);
+  log?: false | LoggerEntry | LoggerEntry[];
   excludedPaths?: string[];
 }
 
@@ -150,11 +153,19 @@ function renderReducedDepTree(
   return lines;
 }
 
-function reportInConsole({
-  specPath,
-  changedDeps,
-  directDeps,
-}: SpecReport): void {
+function logMinimal({ specPath, changedDeps }: SpecLog): void {
+  const specName = path.basename(specPath);
+  if (changedDeps.length === 0) {
+    console.info(`[cypress-only-changed] SKIP  ${specName}`);
+  } else {
+    const n = changedDeps.length;
+    console.info(
+      `[cypress-only-changed] RUN   ${specName}  (${n} changed dep${n === 1 ? "" : "s"})`,
+    );
+  }
+}
+
+function logVerbose({ specPath, changedDeps, directDeps }: SpecLog): void {
   const specName = path.basename(specPath);
   if (changedDeps.length === 0) {
     console.info(`[cypress-only-changed] SKIP  ${specName}`);
@@ -174,6 +185,21 @@ function reportInConsole({
   console.info(
     [`[cypress-only-changed] RUN   ${specName}`, ...treeLines].join("\n"),
   );
+}
+
+function resolveLogger(
+  opt: CypressOnlyChangedPluginOptions["log"],
+): ((specLog: SpecLog) => void)[] {
+  if (opt === false) return [];
+  if (opt === undefined) return [logMinimal];
+  const entries: LoggerEntry[] = Array.isArray(opt) ? opt : [opt];
+  return entries.map((entry) => {
+    if (typeof entry === "function") return entry;
+    if (entry === "minimal") return logMinimal;
+    if (entry === "verbose") return logVerbose;
+    const _: never = entry;
+    throw new Error(`[cypress-only-changed] Unknown logger: "${entry}"`);
+  });
 }
 
 function buildSkipStub(depCount: number): string {
@@ -527,11 +553,11 @@ function collectTransitiveDeps(
 export class CypressOnlyChangedPlugin {
   private readonly changedFiles: Set<string> | null;
   private readonly changedFilesLabel: string | null;
-  private readonly report: ((report: SpecReport) => void) | undefined;
+  private readonly loggers: ((specLog: SpecLog) => void)[];
   private readonly isExcluded: (resource: string) => boolean;
 
   constructor({
-    report,
+    log,
     excludedPaths = ["node_modules"],
   }: CypressOnlyChangedPluginOptions = {}) {
     const resolved = resolveChangedFiles();
@@ -542,12 +568,7 @@ export class CypressOnlyChangedPlugin {
       this.changedFiles = null;
       this.changedFilesLabel = null;
     }
-    this.report =
-      typeof report === "function"
-        ? report
-        : report
-          ? reportInConsole
-          : undefined;
+    this.loggers = resolveLogger(log);
     this.isExcluded =
       excludedPaths.length === 0
         ? () => false
@@ -607,12 +628,13 @@ export class CypressOnlyChangedPlugin {
                   }
                 }
 
-                this.report?.({
+                const specLog: SpecLog = {
                   specPath: module.resource,
                   deps: [...allDeps],
                   changedDeps,
                   directDeps: adjacency,
-                });
+                };
+                for (const r of this.loggers) r(specLog);
 
                 if (changedDeps.length === 0) {
                   const stubSource = new sources.RawSource(

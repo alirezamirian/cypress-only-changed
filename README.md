@@ -119,19 +119,54 @@ new CypressOnlyChangedPlugin(options?)
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `report` | `boolean \| Reporter` | `false` | Log per-spec decisions. `true` uses the built-in coloured tree reporter; pass a function for a custom reporter. |
+| `log` | `false \| ReporterEntry \| ReporterEntry[]` | `'minimal'` | Reporter(s) to call per spec. `false` silences all per-spec logging. |
 | `excludedPaths` | `string[]` | `['node_modules']` | Directory names to exclude from the dependency walk. |
 
+## Logging
+
+### Default: `'minimal'`
+
+When `log` is not set the built-in minimal reporter prints one line per spec —
+no dependency tree:
+
+```
+[cypress-only-changed] SKIP  Button.cy.ts
+[cypress-only-changed] RUN   Form.cy.ts  (2 changed deps)
+```
+
+### Verbose reporter
+
+The `'verbose'` reporter prints the same `SKIP`/`RUN` line plus an ASCII tree
+of the dependency paths that led to the decision (changed files are highlighted;
+unchanged deps are dimmed):
+
+```ts
+new CypressOnlyChangedPlugin({ log: 'verbose' })
+```
+
+```
+[cypress-only-changed] SKIP  Button.cy.ts
+[cypress-only-changed] RUN   Form.cy.ts
+  ├── components/Form.tsx
+  │   └── utils/validation.ts
+  └── styles/form.css
+```
+
 ### Custom reporter
+
+Pass a function, or an array to combine reporters:
 
 ```ts
 import { CypressOnlyChangedPlugin, SpecReport } from 'cypress-only-changed';
 
 new CypressOnlyChangedPlugin({
-  report: ({ specPath, deps, changedDeps, directDeps }: SpecReport) => {
+  log: ({ specPath, changedDeps }: SpecReport) => {
     console.log(specPath, changedDeps.length > 0 ? 'RUN' : 'SKIP');
   },
 })
+
+// combine with a builtin:
+new CypressOnlyChangedPlugin({ log: ['verbose', myCustomReporter] })
 ```
 
 `SpecReport` fields:
