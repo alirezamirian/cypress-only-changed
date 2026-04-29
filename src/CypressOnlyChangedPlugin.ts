@@ -1,4 +1,5 @@
 import { execSync } from "child_process";
+import * as fs from "fs";
 import * as path from "path";
 import type { Compiler, Compilation, Module } from "webpack";
 import { NormalModule, WebpackError, sources } from "webpack";
@@ -10,7 +11,7 @@ export interface SpecLog {
   directDeps: Map<string, string[]>; // adjacency: path → its direct followed dep paths
 }
 
-export type BuiltinLoggerName = "minimal" | "verbose";
+export type BuiltinLoggerName = "minimal" | "verbose" | "github-actions";
 export type LoggerEntry = BuiltinLoggerName | ((specLog: SpecLog) => void);
 
 interface CypressOnlyChangedPluginOptions {
@@ -187,6 +188,46 @@ function logVerbose({ specPath, changedDeps, directDeps }: SpecLog): void {
   );
 }
 
+const _ghaBuffer: SpecLog[] = [];
+let _ghaRegistered = false;
+
+function buildGhaMarkdown(entries: SpecLog[]): string {
+  const rows = entries.map(({ specPath, changedDeps }) => {
+    const name = path.basename(specPath);
+    const status = changedDeps.length === 0 ? "⏭ skip" : "▶ run";
+    let deps = "—";
+    if (changedDeps.length > 0) {
+      const MAX = 3;
+      const names = changedDeps.map((f) => `\`${path.basename(f)}\``);
+      deps =
+        names.length <= MAX
+          ? names.join(", ")
+          : `${names[0]} and ${names.length - 1} more`;
+    }
+    return `| \`${name}\` | ${status} | ${deps} |`;
+  });
+  return [
+    "## Cypress component tests — affected-specs summary",
+    "",
+    "| Spec | Status | Changed dependencies |",
+    "|---|:---:|---|",
+    ...rows,
+    "\n",
+  ].join("\n");
+}
+
+function githubActionsLogger(specLog: SpecLog): void {
+  _ghaBuffer.push(specLog);
+  if (!_ghaRegistered) {
+    _ghaRegistered = true;
+    process.on("exit", () => {
+      const summaryFile = process.env.GITHUB_STEP_SUMMARY;
+      if (!summaryFile) return;
+      fs.appendFileSync(summaryFile, buildGhaMarkdown(_ghaBuffer), "utf8");
+    });
+  }
+}
+
 function resolveLogger(
   opt: CypressOnlyChangedPluginOptions["log"],
 ): ((specLog: SpecLog) => void)[] {
@@ -197,6 +238,7 @@ function resolveLogger(
     if (typeof entry === "function") return entry;
     if (entry === "minimal") return logMinimal;
     if (entry === "verbose") return logVerbose;
+    if (entry === "github-actions") return githubActionsLogger;
     const _: never = entry;
     throw new Error(`[cypress-only-changed] Unknown logger: "${entry}"`);
   });

@@ -152,6 +152,25 @@ new CypressOnlyChangedPlugin({ log: 'verbose' })
   └── styles/form.css
 ```
 
+### GitHub Actions summary
+
+The `'github-actions'` reporter writes a Markdown table to
+[`$GITHUB_STEP_SUMMARY`](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/workflow-commands-for-github-actions#adding-a-job-summary)
+— the panel shown at the bottom of each GitHub Actions job run. It is a no-op
+when `GITHUB_STEP_SUMMARY` is not set (i.e. outside of GitHub Actions).
+
+```ts
+new CypressOnlyChangedPlugin({ log: ['minimal', 'github-actions'] })
+```
+
+The summary looks like this:
+
+| Spec | Status | Changed dependencies |
+|---|:---:|---|
+| `Button.cy.ts` | ⏭ skip | — |
+| `Form.cy.ts` | ▶ run | `validation.ts` and 2 more |
+| `Login.cy.ts` | ▶ run | `auth.ts` |
+
 ### Custom reporter
 
 Pass a function, or an array to combine reporters:

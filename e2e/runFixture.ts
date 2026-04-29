@@ -24,6 +24,9 @@ export function runFixture(fixture: string, changedFiles: string[]) {
     cwd: path.resolve(__dirname),
     env: {
       ...process.env,
+      GITHUB_STEP_SUMMARY:
+        process.env.GITHUB_STEP_SUMMARY ?? // when running tests on github
+        "GITHUB_STEP_SUMMARY.md", // fallback for when running tests locally
       _CHANGED_FILES: JSON.stringify(
         changedFiles.map((changedFile) =>
           abs(`fixtures/${fixture}/${changedFile}`),
