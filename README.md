@@ -1,5 +1,7 @@
 # cypress-only-changed
 
+[![Test](https://github.com/alirezamirian/cypress-only-changed/actions/workflows/test.yml/badge.svg)](https://github.com/alirezamirian/cypress-only-changed/actions/workflows/test.yml)
+
 A webpack plugin for Cypress **component** testing that skips specs whose
 transitive dependency tree doesn't include any changed file. Similar to
 `--only-changed` option in [jest](https://jestjs.io/docs/cli#--onlychanged)
