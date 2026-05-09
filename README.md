@@ -91,8 +91,8 @@ Add scripts to `package.json` for the scenarios you need:
 {
   "scripts": {
     "test": "cypress run --component",
-    "test:affected": "ONLY_CHANGED=origin/main cypress run --component",
-    "test:uncommitted": "ONLY_CHANGED= cypress run --component"
+    "test:affected": "ONLY_CHANGED=origin/main npm run test",
+    "test:uncommitted": "ONLY_CHANGED= npm run test"
   }
 }
 ```
