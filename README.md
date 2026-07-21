@@ -163,6 +163,34 @@ All `options` are optional:
 | `excludedPaths` | `string[]` | `['node_modules']` | Directory names excluded from the dependency walk. |
 | `changedFiles` | `string[]` | _(git)_ | Explicit changed files (absolute paths). When omitted, the same `ONLY_CHANGED` git resolution as the plugin is used. |
 | `placeholderSpecName` | `string` | `'no-affected-specs.cy.js'` | File name of the generated placeholder spec. |
+| `log` | `false \| LoggerEntry \| LoggerEntry[]` | `false` | Per-spec logging — the **same** options as the plugin's [`log`](#logging) (`'minimal'`, `'verbose'`, `'github-actions'`, or a custom function). See below. |
+
+#### Logging (`'minimal'`, `'verbose'`, …)
+
+`filterOnlyChangedSpecs` and `computeAffectedSpecs` accept the exact same `log`
+option as the [`CypressOnlyChangedPlugin`](#logging) — including the `'verbose'`
+reporter that prints, per affected spec, the dependency tree of changed files
+that pulled it in:
+
+```ts
+setupNodeEvents(on, config) {
+  return filterOnlyChangedSpecs(config, { log: 'verbose' });
+}
+```
+
+```
+[cypress-only-changed] SKIP  Button.cy.tsx
+[cypress-only-changed] RUN   Form.cy.tsx
+  └── Form.tsx
+      └── Input.tsx
+[cypress-only-changed] RUN   Input.cy.tsx
+  └── Input.tsx
+```
+
+Unlike the plugin (which defaults to `'minimal'`), these functions default to
+`false` (silent) — `filterOnlyChangedSpecs` already prints a one-line summary,
+so per-spec logging is opt-in. See the [Logging](#logging) section for the full
+list of reporters, the `github-actions` summary, and custom reporters.
 
 > **Trade-off:** filtered-out specs don't appear in the Cypress report at all
 > (unlike stubbing, where they show as pending). Affected-spec detection is
@@ -195,10 +223,10 @@ config, or you want to decide what to do with the result yourself),
   `config.projectRoot`, honoring `config.excludeSpecPattern`, matching **files
   only** (a directory named like a spec — e.g. an image-snapshot folder — is
   ignored) and always excluding `node_modules`.
-- `computeAffectedSpecs({ webpackConfig, specs, excludedPaths?, changedFiles? })`
+- `computeAffectedSpecs({ webpackConfig, specs, excludedPaths?, changedFiles?, log? })`
   → `Promise<string[] | null>` — runs the single webpack graph pass and returns
   the affected specs (`null` when `ONLY_CHANGED` is unset → run all; `[]` when
-  nothing is affected).
+  nothing is affected). Accepts the same `log` reporters as above.
 
 ```ts
 import { computeAffectedSpecs, discoverSpecs } from 'cypress-only-changed';

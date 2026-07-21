@@ -33,10 +33,10 @@ re-exports don't drag in unrelated modules.
     - `barrel-exports.test.ts` — tree-shaking via barrel scenarios
     - `css-import.test.ts` — CSS asset dep scenario
     - `compute-affected-specs.test.ts` — exercises `computeAffectedSpecs`,
-      `discoverSpecs`, and `filterOnlyChangedSpecs` directly (webpack only, no
-      Cypress browser) against the same fixtures, asserting the same affected
-      sets as the stubbing tests — a fast parity / regression guard for the
-      shared dependency-analysis logic
+      `discoverSpecs`, `filterOnlyChangedSpecs`, and the shared `log` reporters
+      directly (webpack only, no Cypress browser) against the same fixtures,
+      asserting the same affected sets as the stubbing tests — a fast parity /
+      regression guard for the shared dependency-analysis logic
   - `support/` — Cypress support files (`component.ts`, `component-index.html`)
 - `tsconfig.json` — **`"module": "commonjs"`** (needed elsewhere)
 - `tsconfig.build.json` — overrides with `"module": "ESNext"`,

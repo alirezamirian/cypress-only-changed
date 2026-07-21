@@ -733,6 +733,17 @@ export interface ComputeAffectedSpecsOptions {
    * {@link resolveChangedFiles}).
    */
   changedFiles?: string[];
+  /**
+   * Per-spec logging — the **same** options as the {@link CypressOnlyChangedPlugin}
+   * `log` option: `"minimal"` (one `RUN`/`SKIP` line per spec), `"verbose"` (adds
+   * an ASCII dependency tree for affected specs), `"github-actions"` (a Markdown
+   * summary table to `$GITHUB_STEP_SUMMARY`), a custom `(specLog) => void`, or an
+   * array combining any of these. Unlike the plugin (which defaults to
+   * `"minimal"`), this defaults to **`false`** (silent) so the programmatic API
+   * stays quiet unless you opt in.
+   * @default false
+   */
+  log?: false | LoggerEntry | LoggerEntry[];
 }
 
 /**
@@ -757,6 +768,7 @@ export async function computeAffectedSpecs(
   options: ComputeAffectedSpecsOptions,
 ): Promise<string[] | null> {
   const { webpackConfig, specs, excludedPaths = ["node_modules"] } = options;
+  const loggers = resolveLogger(options.log ?? false);
 
   let changed: Set<string> | null;
   if (options.changedFiles) {
@@ -824,17 +836,25 @@ export async function computeAffectedSpecs(
         for (const module of modules) {
           if (!(module instanceof NormalModule)) continue;
           if (!SPEC_PATTERN.test(module.resource)) continue;
-          const { paths } = collectTransitiveDeps(
+          const { paths, adjacency } = collectTransitiveDeps(
             module,
             moduleGraph,
             isExcluded,
           );
+          const changedDeps: string[] = [];
           for (const depPath of paths) {
-            if (changed!.has(depPath)) {
-              affected.add(module.resource);
-              break;
-            }
+            if (changed!.has(depPath)) changedDeps.push(depPath);
           }
+          if (loggers.length > 0) {
+            const specLog: SpecLog = {
+              specPath: module.resource,
+              deps: [...paths],
+              changedDeps,
+              directDeps: adjacency,
+            };
+            for (const log of loggers) log(specLog);
+          }
+          if (changedDeps.length > 0) affected.add(module.resource);
         }
         (compiler as unknown as { __affected: Set<string> }).__affected =
           affected;
@@ -912,6 +932,16 @@ export interface FilterOnlyChangedSpecsOptions {
    * @default "no-affected-specs.cy.js"
    */
   placeholderSpecName?: string;
+  /**
+   * Per-spec logging — the **same** options as the {@link CypressOnlyChangedPlugin}
+   * `log` option: `"minimal"`, `"verbose"` (prints an ASCII dependency tree for
+   * each affected spec, showing the changed deps that pulled it in),
+   * `"github-actions"`, a custom `(specLog) => void`, or an array of these.
+   * Independent of the one-line summary this function always prints. Defaults to
+   * `false` (no per-spec output).
+   * @default false
+   */
+  log?: false | LoggerEntry | LoggerEntry[];
 }
 
 function toArray(value: string | string[] | undefined): string[] {
@@ -1030,6 +1060,7 @@ export async function filterOnlyChangedSpecs<T extends CypressSpecConfig>(
     specs,
     excludedPaths: options.excludedPaths,
     changedFiles,
+    log: options.log,
   });
 
   if (affected && affected.length > 0) {

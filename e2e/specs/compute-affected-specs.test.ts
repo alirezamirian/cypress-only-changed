@@ -57,9 +57,7 @@ async function affectedBasenames(
   changed: string[],
 ): Promise<string[]> {
   const specs = specFilesFor(fixture);
-  const changedFiles = changed.map((c) =>
-    path.join(fixturesDir, fixture, c),
-  );
+  const changedFiles = changed.map((c) => path.join(fixturesDir, fixture, c));
   const result = await computeAffectedSpecs({
     webpackConfig: analysisWebpackConfig(),
     specs,
@@ -112,38 +110,46 @@ describe("computeAffectedSpecs — basic", { concurrency: false }, () => {
   });
 });
 
-describe("computeAffectedSpecs — barrel-exports", { concurrency: false }, () => {
-  it("no files changed — nothing affected", async () => {
-    assertAffected(await affectedBasenames("barrel-exports", []), []);
-  });
+describe(
+  "computeAffectedSpecs — barrel-exports",
+  { concurrency: false },
+  () => {
+    it("no files changed — nothing affected", async () => {
+      assertAffected(await affectedBasenames("barrel-exports", []), []);
+    });
 
-  it("Input.tsx changed — only Input (Button tree-shaken)", async () => {
-    assertAffected(await affectedBasenames("barrel-exports", ["Input.tsx"]), [
-      "Input.cy.tsx",
-    ]);
-  });
+    it("Input.tsx changed — only Input (Button tree-shaken)", async () => {
+      assertAffected(await affectedBasenames("barrel-exports", ["Input.tsx"]), [
+        "Input.cy.tsx",
+      ]);
+    });
 
-  it("Button.tsx changed — only Button (Input tree-shaken)", async () => {
-    assertAffected(await affectedBasenames("barrel-exports", ["Button.tsx"]), [
-      "Button.cy.tsx",
-    ]);
-  });
-
-  it("utils.ts changed — nothing affected", async () => {
-    assertAffected(await affectedBasenames("barrel-exports", ["utils.ts"]), []);
-  });
-
-  it(
-    "utils-barrel.ts changed — nothing uses it (FAILS: export * false positive)",
-    { skip: "Known limitation — mirrors barrel-exports.test.ts" },
-    async () => {
+    it("Button.tsx changed — only Button (Input tree-shaken)", async () => {
       assertAffected(
-        await affectedBasenames("barrel-exports", ["utils-barrel.ts"]),
+        await affectedBasenames("barrel-exports", ["Button.tsx"]),
+        ["Button.cy.tsx"],
+      );
+    });
+
+    it("utils.ts changed — nothing affected", async () => {
+      assertAffected(
+        await affectedBasenames("barrel-exports", ["utils.ts"]),
         [],
       );
-    },
-  );
-});
+    });
+
+    it(
+      "utils-barrel.ts changed — nothing uses it (FAILS: export * false positive)",
+      { skip: "Known limitation — mirrors barrel-exports.test.ts" },
+      async () => {
+        assertAffected(
+          await affectedBasenames("barrel-exports", ["utils-barrel.ts"]),
+          [],
+        );
+      },
+    );
+  },
+);
 
 describe("computeAffectedSpecs — css-import", { concurrency: false }, () => {
   it("no files changed — nothing affected", async () => {
@@ -157,22 +163,26 @@ describe("computeAffectedSpecs — css-import", { concurrency: false }, () => {
   });
 });
 
-describe("computeAffectedSpecs — run-all signal", { concurrency: false }, () => {
-  it("returns null when ONLY_CHANGED is unset and no changedFiles given", async () => {
-    const hadOnlyChanged = "ONLY_CHANGED" in process.env;
-    const prev = process.env.ONLY_CHANGED;
-    delete process.env.ONLY_CHANGED;
-    try {
-      const result = await computeAffectedSpecs({
-        webpackConfig: analysisWebpackConfig(),
-        specs: specFilesFor("basic"),
-      });
-      assert.equal(result, null);
-    } finally {
-      if (hadOnlyChanged) process.env.ONLY_CHANGED = prev;
-    }
-  });
-});
+describe(
+  "computeAffectedSpecs — run-all signal",
+  { concurrency: false },
+  () => {
+    it("returns null when ONLY_CHANGED is unset and no changedFiles given", async () => {
+      const hadOnlyChanged = "ONLY_CHANGED" in process.env;
+      const prev = process.env.ONLY_CHANGED;
+      delete process.env.ONLY_CHANGED;
+      try {
+        const result = await computeAffectedSpecs({
+          webpackConfig: analysisWebpackConfig(),
+          specs: specFilesFor("basic"),
+        });
+        assert.equal(result, null);
+      } finally {
+        if (hadOnlyChanged) process.env.ONLY_CHANGED = prev;
+      }
+    });
+  },
+);
 
 describe("discoverSpecs", { concurrency: false }, () => {
   it("globs specPattern from projectRoot", () => {
@@ -271,5 +281,93 @@ describe("filterOnlyChangedSpecs", { concurrency: false }, () => {
     assert.ok(Array.isArray(out.specPattern));
     const names = (out.specPattern as string[]).map((s) => path.basename(s));
     assert.deepEqual(names, ["Input.cy.tsx"]);
+  });
+});
+
+describe("logging", { concurrency: false }, () => {
+  function captureConsole(): { lines: string[]; restore: () => void } {
+    const lines: string[] = [];
+    const orig = console.info;
+    console.info = (...args: unknown[]) => {
+      lines.push(args.map(String).join(" "));
+    };
+    return { lines, restore: () => (console.info = orig) };
+  }
+
+  it("verbose log: RUN line + dependency tree for the affected spec", async () => {
+    const cap = captureConsole();
+    try {
+      await computeAffectedSpecs({
+        webpackConfig: analysisWebpackConfig(),
+        specs: specFilesFor("basic"),
+        changedFiles: [path.join(fixturesDir, "basic", "Button.tsx")],
+        log: "verbose",
+      });
+    } finally {
+      cap.restore();
+    }
+    const output = cap.lines.join("\n");
+    // Button + Form run (affected by Button.tsx); the verbose tree names the
+    // changed dep. Input/config/utils are skipped.
+    assert.match(output, /RUN\s+Button\.cy\.tsx/);
+    assert.match(output, /RUN\s+Form\.cy\.tsx/);
+    assert.match(output, /Button\.tsx/); // changed dep appears in a tree
+    assert.match(output, /SKIP\s+Input\.cy\.tsx/);
+  });
+
+  it("minimal log: one RUN/SKIP line per spec, no tree", async () => {
+    const cap = captureConsole();
+    try {
+      await computeAffectedSpecs({
+        webpackConfig: analysisWebpackConfig(),
+        specs: specFilesFor("basic"),
+        changedFiles: [path.join(fixturesDir, "basic", "config.ts")],
+        log: "minimal",
+      });
+    } finally {
+      cap.restore();
+    }
+    const output = cap.lines.join("\n");
+    assert.match(output, /RUN\s+config\.cy\.ts/);
+    assert.match(output, /SKIP\s+Button\.cy\.tsx/);
+    // no tree branch characters from the verbose renderer
+    assert.ok(!/[├└]──/.test(output), "minimal output must not contain a tree");
+  });
+
+  it("default (no log option) is silent", async () => {
+    const cap = captureConsole();
+    try {
+      await computeAffectedSpecs({
+        webpackConfig: analysisWebpackConfig(),
+        specs: specFilesFor("basic"),
+        changedFiles: [path.join(fixturesDir, "basic", "Button.tsx")],
+      });
+    } finally {
+      cap.restore();
+    }
+    const perSpec = cap.lines.filter((l) => /RUN|SKIP/.test(l));
+    assert.equal(perSpec.length, 0);
+  });
+
+  it("filterOnlyChangedSpecs forwards the log option", async () => {
+    const cap = captureConsole();
+    try {
+      await filterOnlyChangedSpecs(
+        {
+          projectRoot: path.join(fixturesDir, "basic"),
+          specPattern: "**/*.cy.{ts,tsx}",
+          devServer: { webpackConfig: analysisWebpackConfig() },
+        },
+        {
+          changedFiles: [path.join(fixturesDir, "basic", "Button.tsx")],
+          log: "minimal",
+        },
+      );
+    } finally {
+      cap.restore();
+    }
+    const output = cap.lines.join("\n");
+    assert.match(output, /RUN\s+Button\.cy\.tsx/);
+    assert.match(output, /SKIP\s+Input\.cy\.tsx/);
   });
 });
