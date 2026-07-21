@@ -69,6 +69,30 @@ create a webpack-specific override and point ts-loader at it:
 }
 ```
 
+### Limitation: static imports only
+
+The analysis is **purely static** — it follows `import`/`export` edges in the
+webpack module graph. A spec is only linked to the code it exercises if that
+code is reachable through those edges. Anything referenced **only at runtime** is
+invisible to the analysis, e.g.:
+
+- components rendered from an **HTML/template string** rather than imported
+  (common when a shared, framework-agnostic test suite mounts a component by
+  markup instead of importing it);
+- modules pulled in by **string-based dynamic resolution** the bundler can't
+  see.
+
+If a spec exercises a component it doesn't (transitively) `import`, a change to
+that component **won't** mark the spec as affected — a false negative (the spec
+is wrongly skipped). This applies to **both** the plugin and
+`filterOnlyChangedSpecs`.
+
+**Guidance:** make sure each spec statically imports the subject it tests
+(directly, or via an `examples`/index module that imports it) — which is also
+what makes the spec type-check. If a project's specs fundamentally can't do this
+(e.g. an Angular suite that mounts components via template strings), spec-level
+filtering isn't safe for it; prefer running the full suite there.
+
 ## Installation
 
 ```bash
