@@ -26,6 +26,21 @@ The walk is tree-shaking–aware: barrel re-exports (`export { X } from './Y'`)
 are followed only for the names that are actually imported, so an unrelated
 module re-exported from the same index file doesn't pull the spec in.
 
+### Two modes
+
+There are two ways to use this, sharing the exact same dependency analysis:
+
+| Mode | How | Unaffected specs |
+|---|---|---|
+| **Stubbing** (the plugin) | `new CypressOnlyChangedPlugin()` in your webpack config | Still appear in the run, but their body is replaced with a pending `it.skip` |
+| **Filtering** ([`filterOnlyChangedSpecs`](#spec-level-filtering-with-filteronlychangedspecs)) | Restrict Cypress `specPattern` in `setupNodeEvents` to the affected specs | Excluded from the run — the browser is never launched for them |
+
+Stubbing is the simplest drop-in. Filtering is faster when most specs are
+unaffected, because Cypress's fixed per-spec browser orchestration (navigating,
+loading, tearing down a session for every spec) dominates the run time even when
+a spec's body is a no-op `it.skip`. See
+[Spec-level filtering](#spec-level-filtering-with-filteronlychangedspecs).
+
 ## Requirements
 
 The tree-shaking analysis relies on webpack's harmony (ESM) module graph.
@@ -85,7 +100,144 @@ export default defineConfig({
 The plugin is a **no-op by default** — all specs run normally unless
 `ONLY_CHANGED` is set.
 
+## Spec-level filtering with `filterOnlyChangedSpecs`
+
+The stubbing plugin still lets Cypress start a browser session for every spec —
+even the skipped ones. When most specs are unaffected, that per-spec overhead is
+the bottleneck. Spec-level filtering runs the **same** dependency analysis once
+up front and hands Cypress **only** the affected specs, so it never launches a
+browser for the rest.
+
+`filterOnlyChangedSpecs` is the batteries-included way to do this. Call it from
+`setupNodeEvents` and return what it gives you — it reads everything it needs
+from the Cypress `config` (spec globs **and** the webpack config), rewrites
+`config.specPattern`, and manages the "nothing affected" placeholder internally:
+
+```ts
+// cypress.config.ts
+import { defineConfig } from 'cypress';
+import { filterOnlyChangedSpecs } from 'cypress-only-changed';
+
+import webpackConfig from './cypress/webpack.config';
+
+export default defineConfig({
+  component: {
+    devServer: { framework: 'react', bundler: 'webpack', webpackConfig },
+    setupNodeEvents(on, config) {
+      // No spec list, no placeholder file, no null-handling — the package
+      // reads config.specPattern / config.excludeSpecPattern and
+      // config.devServer.webpackConfig for you.
+      return filterOnlyChangedSpecs(config);
+    },
+  },
+});
+```
+
+Run it with the same `ONLY_CHANGED` variable as the plugin (see
+[below](#only_changed-environment-variable)):
+
+```bash
+ONLY_CHANGED=origin/main cypress run --component
+```
+
+You **don't** need the `CypressOnlyChangedPlugin` in your webpack config when you
+filter — the analysis is done for you.
+
+### `filterOnlyChangedSpecs(config, options?)`
+
+`config` is the Cypress config passed to `setupNodeEvents`. It reads
+`projectRoot`, `specPattern`, `excludeSpecPattern`, and
+`devServer.webpackConfig` from it. Behavior:
+
+| `ONLY_CHANGED` / changes | Effect on `config.specPattern` |
+|---|---|
+| unset | untouched — every spec runs (no-op) |
+| set, some specs affected | replaced with the affected spec paths |
+| set, nothing affected | replaced with an internal placeholder spec (run exits 0) |
+
+All `options` are optional:
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `webpackConfig` | `webpack.Configuration` | `config.devServer.webpackConfig` | Override the webpack config used for the graph pass. |
+| `excludedPaths` | `string[]` | `['node_modules']` | Directory names excluded from the dependency walk. |
+| `changedFiles` | `string[]` | _(git)_ | Explicit changed files (absolute paths). When omitted, the same `ONLY_CHANGED` git resolution as the plugin is used. |
+| `placeholderSpecName` | `string` | `'no-affected-specs.cy.js'` | File name of the generated placeholder spec. |
+| `log` | `false \| LoggerEntry \| LoggerEntry[]` | `false` | Per-spec logging — the **same** options as the plugin's [`log`](#logging) (`'minimal'`, `'verbose'`, `'github-actions'`, or a custom function). See below. |
+
+#### Logging (`'minimal'`, `'verbose'`, …)
+
+`filterOnlyChangedSpecs` and `computeAffectedSpecs` accept the exact same `log`
+option as the [`CypressOnlyChangedPlugin`](#logging) — including the `'verbose'`
+reporter that prints, per affected spec, the dependency tree of changed files
+that pulled it in:
+
+```ts
+setupNodeEvents(on, config) {
+  return filterOnlyChangedSpecs(config, { log: 'verbose' });
+}
+```
+
+```
+[cypress-only-changed] SKIP  Button.cy.tsx
+[cypress-only-changed] RUN   Form.cy.tsx
+  └── Form.tsx
+      └── Input.tsx
+[cypress-only-changed] RUN   Input.cy.tsx
+  └── Input.tsx
+```
+
+Unlike the plugin (which defaults to `'minimal'`), these functions default to
+`false` (silent) — `filterOnlyChangedSpecs` already prints a one-line summary,
+so per-spec logging is opt-in. See the [Logging](#logging) section for the full
+list of reporters, the `github-actions` summary, and custom reporters.
+
+> **Trade-off:** filtered-out specs don't appear in the Cypress report at all
+> (unlike stubbing, where they show as pending). Affected-spec detection is
+> identical to the plugin — it reuses the same tree-shaking-aware walk.
+
+### Works with `cypress open` too
+
+Because filtering happens in `setupNodeEvents` (not inside the webpack build), it
+applies to **both** `cypress run` and `cypress open`. Opening the interactive
+runner with `ONLY_CHANGED` set shows only the affected specs in the spec list —
+handy for local development, since you can iterate on just the specs your change
+touches instead of scrolling past the whole suite. (The in-webpack
+`CypressOnlyChangedPlugin` also technically runs in `open`, but it only stubs
+spec bodies — every spec still shows up in the list.)
+
+> **Caveat:** the affected-spec list is computed **once**, when `setupNodeEvents`
+> runs at startup. It does **not** react to files you edit during an open
+> session — a spec that becomes affected (or unaffected) after you start won't
+> appear or disappear until you restart Cypress. For a live, always-current list,
+> run `cypress open` without `ONLY_CHANGED` (all specs) and rely on filtering
+> only in CI / `cypress run`.
+
+### Lower-level: `computeAffectedSpecs` / `discoverSpecs`
+
+If you need more control (e.g. your dev server doesn't expose a plain webpack
+config, or you want to decide what to do with the result yourself),
+`filterOnlyChangedSpecs` is built from two smaller exports:
+
+- `discoverSpecs(config)` → `string[]` — globs `config.specPattern` from
+  `config.projectRoot`, honoring `config.excludeSpecPattern`, matching **files
+  only** (a directory named like a spec — e.g. an image-snapshot folder — is
+  ignored) and always excluding `node_modules`.
+- `computeAffectedSpecs({ webpackConfig, specs, excludedPaths?, changedFiles?, log? })`
+  → `Promise<string[] | null>` — runs the single webpack graph pass and returns
+  the affected specs (`null` when `ONLY_CHANGED` is unset → run all; `[]` when
+  nothing is affected). Accepts the same `log` reporters as above.
+
+```ts
+import { computeAffectedSpecs, discoverSpecs } from 'cypress-only-changed';
+
+const specs = discoverSpecs(config);
+const affected = await computeAffectedSpecs({ webpackConfig, specs });
+// affected: null → run all, [] → run none, string[] → run these
+```
+
 ## Usage
+
 
 Add scripts to `package.json` for the scenarios you need:
 
