@@ -1,6 +1,6 @@
 {
   "name": "cypress-only-changed",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "main": "dist/CypressOnlyChangedPlugin.js",
   "types": "dist/CypressOnlyChangedPlugin.d.ts",
   "files": [
