@@ -7,7 +7,12 @@ re-exports don't drag in unrelated modules.
 
 ## Layout
 
-- `src/CypressOnlyChangedPlugin.ts` — the plugin
+- `src/CypressOnlyChangedPlugin.ts` — the plugin, plus the spec-level-filtering
+  API: `filterOnlyChangedSpecs(config, options?)` (batteries-included: reads
+  specs + webpack config from the Cypress config, rewrites `specPattern`,
+  manages the placeholder), built from `discoverSpecs()` and
+  `computeAffectedSpecs()`, all reusing the same tree-shaking-aware analysis
+  (`resolveChangedFiles`, `collectTransitiveDeps`, `SPEC_PATTERN`)
 - `e2e/` — everything test-related
   - `cypress.config.ts` — wires the plugin into Cypress component testing;
     reads `CHANGED_FILES` env var (JSON array of absolute paths); exports
@@ -27,6 +32,11 @@ re-exports don't drag in unrelated modules.
     - `basic.test.ts` — direct/transitive dep scenarios
     - `barrel-exports.test.ts` — tree-shaking via barrel scenarios
     - `css-import.test.ts` — CSS asset dep scenario
+    - `compute-affected-specs.test.ts` — exercises `computeAffectedSpecs`,
+      `discoverSpecs`, and `filterOnlyChangedSpecs` directly (webpack only, no
+      Cypress browser) against the same fixtures, asserting the same affected
+      sets as the stubbing tests — a fast parity / regression guard for the
+      shared dependency-analysis logic
   - `support/` — Cypress support files (`component.ts`, `component-index.html`)
 - `tsconfig.json` — **`"module": "commonjs"`** (needed elsewhere)
 - `tsconfig.build.json` — overrides with `"module": "ESNext"`,
